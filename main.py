@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from openai import OpenAI
 import os
 from dotenv import load_dotenv
 
@@ -7,20 +8,15 @@ load_dotenv()
 
 app = FastAPI()
 
-# 🔑 clé
-API_KEY = os.getenv("OPENAI_API_KEY")
-
-print("API KEY =", API_KEY)
+# 🔑 OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # =========================
 # ROOT
 # =========================
 @app.get("/")
 def root():
-    return {
-        "status": "OK 🚀",
-        "api_key_loaded": API_KEY is not None
-    }
+    return {"status": "AdminFlow AI OK 🚀"}
 
 
 # =========================
@@ -31,12 +27,28 @@ class EmailRequest(BaseModel):
 
 
 # =========================
-# 📧 EMAIL (sans OpenAI pour test)
+# 📧 EMAIL
 # =========================
 @app.post("/email")
 def analyze_email(request: EmailRequest):
-    return {
-        "message": "API fonctionne",
-        "content_recu": request.content,
-        "api_key_loaded": API_KEY is not None
-    }
+
+    prompt = f"""
+Tu es un assistant administratif professionnel.
+
+Analyse cet email et retourne :
+- catégorie
+- résumé (1 phrase)
+- réponse professionnelle
+
+Email :
+{request.content}
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    result = response.choices[0].message.content
+
+    return {"result": result}
