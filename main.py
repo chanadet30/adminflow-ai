@@ -3,12 +3,9 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-import json
-
-# OCR (optionnel)
 import pytesseract
 from PIL import Image
-import shutil
+import json
 
 # DB
 from database import SessionLocal, engine
@@ -22,21 +19,25 @@ load_dotenv()
 
 app = FastAPI()
 
-# CORS
+# CORS (autorise Railway + localhost)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # autorise Railway + frontend
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# =========================
+# 🔐 OPENAI SAFE INIT
+# =========================
+def get_client():
+    api_key = os.getenv("OPENAI_API_KEY")
 
-# OCR config (compatible Railway)
-if shutil.which("tesseract"):
-    pytesseract.pytesseract.tesseract_cmd = "tesseract"
+    if not api_key:
+        raise Exception("OPENAI_API_KEY manquante")
+
+    return OpenAI(api_key=api_key)
 
 
 # =========================
@@ -60,7 +61,7 @@ def detect_category(fournisseur):
     if any(x in f for x in ["loyer", "rent", "immobilier"]):
         return "loyer"
 
-    if any(x in f for x in ["banque", "caisse", "credit", "bnp", "societe generale"]):
+    if any(x in f for x in ["banque", "credit", "bnp", "societe generale"]):
         return "finance"
 
     if any(x in f for x in ["consult", "service", "solution"]):
@@ -83,8 +84,11 @@ def root():
 @app.post("/email")
 def analyze_email(content: str):
     db = SessionLocal()
+    client = get_client()
 
     prompt = f"""
+Tu es un assistant administratif professionnel.
+
 Analyse cet email et retourne :
 - catégorie
 - résumé (1 phrase)
@@ -113,6 +117,7 @@ Email :
 @app.post("/invoice")
 async def analyze_invoice(file: UploadFile = File(...)):
     db = SessionLocal()
+    client = get_client()
 
     try:
         file_location = f"temp_{file.filename}"
@@ -120,12 +125,8 @@ async def analyze_invoice(file: UploadFile = File(...)):
         with open(file_location, "wb") as f:
             f.write(await file.read())
 
-        # OCR (si dispo)
-        text = ""
-        if shutil.which("tesseract"):
-            text = pytesseract.image_to_string(Image.open(file_location))
-        else:
-            text = "OCR non disponible"
+        # OCR
+        text = pytesseract.image_to_string(Image.open(file_location))
 
         prompt = f"""
 Analyse cette facture et retourne STRICTEMENT un JSON :
@@ -146,7 +147,6 @@ Texte :
         )
 
         raw = response.choices[0].message.content
-
         cleaned = raw.replace("```json", "").replace("```", "").strip()
 
         try:
@@ -154,7 +154,7 @@ Texte :
         except:
             parsed = {"error": "Parsing échoué", "raw": cleaned}
 
-        # Normalisation montant
+        # 💰 montant
         try:
             montant = parsed.get("montant", "0")
             montant = montant.replace("€", "").replace(",", ".").strip()
@@ -162,6 +162,7 @@ Texte :
         except:
             parsed["montant"] = "0"
 
+        # 🏷️ catégorie
         fournisseur = parsed.get("fournisseur", "")
         parsed["categorie"] = detect_category(fournisseur)
 
@@ -182,10 +183,7 @@ def get_history():
     db = SessionLocal()
     data = db.query(Analysis).all()
 
-    return [
-        {"type": item.type, "content": item.content}
-        for item in data
-    ]
+    return [{"type": i.type, "content": i.content} for i in data]
 
 
 # =========================
@@ -203,47 +201,12 @@ def get_stats():
         if item.type == "facture":
             try:
                 parsed = json.loads(item.content)
-                montant = float(parsed.get("montant", "0"))
-                total += montant
+                total += float(parsed.get("montant", "0"))
                 count += 1
             except:
-                continue
+                pass
 
     return {
         "total_depenses": total,
         "nombre_factures": count
-    }
-
-
-# =========================
-# 📊 DASHBOARD AVANCÉ
-# =========================
-@app.get("/advanced-stats")
-def advanced_stats():
-    db = SessionLocal()
-    data = db.query(Analysis).all()
-
-    categories = {}
-    monthly = {}
-
-    for item in data:
-        if item.type == "facture":
-            try:
-                parsed = json.loads(item.content)
-
-                montant = float(parsed.get("montant", "0"))
-                cat = parsed.get("categorie", "autre")
-                date = parsed.get("date", "2025-01-01")
-
-                categories[cat] = categories.get(cat, 0) + montant
-
-                month = date[:7]
-                monthly[month] = monthly.get(month, 0) + montant
-
-            except:
-                continue
-
-    return {
-        "categories": categories,
-        "monthly": monthly
     }
