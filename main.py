@@ -29,12 +29,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# OpenAI (safe pour Railway)
+# =========================
+# 🔍 DEBUG ENV (IMPORTANT)
+# =========================
+print("==== ENV DEBUG ====")
+print("OPENAI_API_KEY =", os.getenv("OPENAI_API_KEY"))
+print("===================")
+
+# =========================
+# OpenAI
+# =========================
 client = None
 if os.getenv("OPENAI_API_KEY"):
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# OCR (local seulement, pas utilisé sur Railway)
+# OCR (local uniquement)
 try:
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 except:
@@ -134,8 +143,10 @@ async def analyze_invoice(file: UploadFile = File(...)):
         with open(file_location, "wb") as f:
             f.write(await file.read())
 
-        # OCR
         text = pytesseract.image_to_string(Image.open(file_location))
+
+        if not client:
+            return {"error": "OpenAI API key missing"}
 
         prompt = f"""
 Analyse cette facture et retourne STRICTEMENT un JSON :
@@ -150,9 +161,6 @@ Texte :
 {text}
 """
 
-        if not client:
-            return {"error": "OpenAI API key missing"}
-
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}]
@@ -166,7 +174,6 @@ Texte :
         except:
             parsed = {"error": "Parsing échoué", "raw": cleaned}
 
-        # 💰 montant
         try:
             montant = parsed.get("montant", "0")
             montant = montant.replace("€", "").replace(",", ".").strip()
@@ -174,7 +181,6 @@ Texte :
         except:
             parsed["montant"] = "0"
 
-        # 🏷️ catégorie
         fournisseur = parsed.get("fournisseur", "")
         parsed["categorie"] = detect_category(fournisseur)
 
