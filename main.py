@@ -20,7 +20,7 @@ load_dotenv()
 
 app = FastAPI()
 
-# CORS (important pour frontend)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,24 +30,9 @@ app.add_middleware(
 )
 
 # =========================
-# 🔍 DEBUG ENV (IMPORTANT)
+# 🔥 OPENAI (clé en dur pour test)
 # =========================
-print("==== ENV DEBUG ====")
-print("OPENAI_API_KEY =", os.getenv("OPENAI_API_KEY"))
-print("===================")
-
-# =========================
-# OpenAI
-# =========================
-client = None
-if os.getenv("OPENAI_API_KEY"):
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# OCR (local uniquement)
-try:
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-except:
-    pass
+client = OpenAI(api_key=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)
 
 
 # =========================
@@ -102,9 +87,6 @@ def root():
 def analyze_email(request: EmailRequest):
     db = SessionLocal()
 
-    if not client:
-        return {"error": "OpenAI API key missing"}
-
     prompt = f"""
 Tu es un assistant administratif professionnel.
 
@@ -144,9 +126,6 @@ async def analyze_invoice(file: UploadFile = File(...)):
             f.write(await file.read())
 
         text = pytesseract.image_to_string(Image.open(file_location))
-
-        if not client:
-            return {"error": "OpenAI API key missing"}
 
         prompt = f"""
 Analyse cette facture et retourne STRICTEMENT un JSON :
