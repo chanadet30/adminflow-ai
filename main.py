@@ -6,11 +6,11 @@ from openai import OpenAI
 app = FastAPI()
 
 # =========================
-# 🌐 CORS (FRONTEND LOCAL)
+# 🌐 CORS
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # frontend Next.js
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -20,6 +20,13 @@ app.add_middleware(
 # 🔑 OpenAI
 # =========================
 client = OpenAI()
+
+# =========================
+# TEST (IMPORTANT DEBUG)
+# =========================
+@app.get("/test")
+def test():
+    return {"msg": "NEW VERSION OK 🚀"}
 
 # =========================
 # ROOT
@@ -61,7 +68,7 @@ Email :
         return {"error": str(e)}
 
 # =========================
-# 📄 INVOICE ANALYSIS (SIMPLE VERSION)
+# 📄 INVOICE ANALYSIS
 # =========================
 @app.post("/invoice")
 async def analyze_invoice(file: UploadFile = File(...)):
