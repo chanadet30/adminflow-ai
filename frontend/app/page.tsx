@@ -4,70 +4,101 @@ import { useState } from "react";
 
 export default function Home() {
   const [email, setEmail] = useState("");
-  const [result, setResult] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [emailResult, setEmailResult] = useState("");
+
+  const [file, setFile] = useState<File | null>(null);
+  const [invoiceResult, setInvoiceResult] = useState("");
 
   const API_URL = "https://adminflow-ai-production.up.railway.app";
 
-  const handleAnalyze = async () => {
-    setLoading(true);
-    setResult("");
+  // EMAIL
+  const handleEmail = async () => {
+    const res = await fetch(`${API_URL}/email`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ content: email }),
+    });
 
-    try {
-      const res = await fetch(`${API_URL}/email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content: email }),
-      });
+    const data = await res.json();
+    setEmailResult(data.result);
+  };
 
-      const data = await res.json();
+  // INVOICE
+  const handleInvoice = async () => {
+    if (!file) return;
 
-      if (data.result) {
-        setResult(data.result);
-      } else {
-        setResult("Erreur API");
-      }
-    } catch (err) {
-      setResult("Erreur réseau");
-    }
+    const formData = new FormData();
+    formData.append("file", file);
 
-    setLoading(false);
+    const res = await fetch(`${API_URL}/invoice`, {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json();
+    setInvoiceResult(data.result);
   };
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-6">
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-2xl">
+      <div className="bg-white p-8 rounded-xl shadow w-full max-w-xl space-y-6">
 
-        <h1 className="text-2xl font-bold text-center mb-2">
+        <h1 className="text-xl font-bold text-center">
           🚀 AdminFlow AI
         </h1>
-        <p className="text-center text-gray-500 mb-6">
-          Assistant administratif intelligent
-        </p>
 
-        <textarea
-          className="w-full border rounded-lg p-3 mb-4"
-          rows={6}
-          placeholder="Colle ton email ici..."
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+        {/* EMAIL */}
+        <div>
+          <h2 className="font-semibold">📧 Analyse Email</h2>
 
-        <button
-          onClick={handleAnalyze}
-          className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition"
-        >
-          {loading ? "Analyse en cours..." : "Analyser Email"}
-        </button>
+          <textarea
+            className="w-full border p-2 rounded mt-2"
+            rows={4}
+            placeholder="Colle ton email..."
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
 
-        {result && (
-          <div className="mt-6 bg-gray-50 p-4 rounded-lg border">
-            <h2 className="font-semibold mb-2">📊 Résultat</h2>
-            <pre className="whitespace-pre-wrap text-sm">{result}</pre>
-          </div>
-        )}
+          <button
+            onClick={handleEmail}
+            className="w-full bg-blue-600 text-white py-2 rounded mt-2"
+          >
+            Analyser Email
+          </button>
+
+          {emailResult && (
+            <div className="mt-2 bg-gray-100 p-2 rounded">
+              <pre>{emailResult}</pre>
+            </div>
+          )}
+        </div>
+
+        {/* INVOICE */}
+        <div>
+          <h2 className="font-semibold">📄 Analyse Facture</h2>
+
+          <input
+            type="file"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            className="mt-2"
+          />
+
+          <button
+            onClick={handleInvoice}
+            className="w-full bg-green-600 text-white py-2 rounded mt-2"
+          >
+            Analyser Facture
+          </button>
+
+          {invoiceResult && (
+            <div className="mt-2 bg-gray-100 p-2 rounded">
+              <pre>{invoiceResult}</pre>
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );

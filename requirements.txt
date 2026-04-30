@@ -6,3 +6,4 @@ pytesseract
 python-dotenv
 openai
 sqlalchemy
+PyPDF2

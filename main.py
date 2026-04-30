@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
+from PyPDF2 import PdfReader
 
 app = FastAPI()
 
@@ -22,11 +23,11 @@ app.add_middleware(
 client = OpenAI()
 
 # =========================
-# TEST (IMPORTANT DEBUG)
+# TEST
 # =========================
 @app.get("/test")
 def test():
-    return {"msg": "NEW VERSION OK 🚀"}
+    return {"msg": "API OK 🚀"}
 
 # =========================
 # ROOT
@@ -68,20 +69,33 @@ Email :
         return {"error": str(e)}
 
 # =========================
-# 📄 INVOICE ANALYSIS
+# 📄 INVOICE ANALYSIS (PDF)
 # =========================
 @app.post("/invoice")
 async def analyze_invoice(file: UploadFile = File(...)):
     try:
+        # lire le fichier PDF
+        reader = PdfReader(file.file)
+        text = ""
+
+        for page in reader.pages:
+            text += page.extract_text() or ""
+
+        if not text:
+            text = "Impossible d'extraire le texte du PDF"
+
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=f"""
-Un utilisateur a uploadé une facture nommée : {file.filename}
+Analyse cette facture :
+
+{text}
 
 Donne :
-- type de document
-- informations possibles (montant, date, fournisseur)
-- résumé rapide
+- fournisseur
+- montant
+- date
+- résumé
 """
         )
 
