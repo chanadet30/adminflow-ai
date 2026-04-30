@@ -3,7 +3,6 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-import pytesseract
 from PIL import Image
 import json
 
@@ -19,7 +18,7 @@ load_dotenv()
 
 app = FastAPI()
 
-# CORS (autorise Railway + localhost)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,31 +40,23 @@ def get_client():
 
 
 # =========================
-# 🧠 CATÉGORISATION MÉTIER
+# 🧠 CATÉGORISATION
 # =========================
 def detect_category(fournisseur):
     f = fournisseur.lower()
 
     if any(x in f for x in ["edf", "engie", "energie"]):
         return "energie"
-
     if any(x in f for x in ["orange", "sfr", "bouygues", "free"]):
         return "telecom"
-
     if any(x in f for x in ["sncf", "uber", "ratp", "taxi"]):
         return "transport"
-
     if any(x in f for x in ["netflix", "spotify", "amazon"]):
         return "abonnement"
-
-    if any(x in f for x in ["loyer", "rent", "immobilier"]):
+    if any(x in f for x in ["loyer", "rent"]):
         return "loyer"
-
-    if any(x in f for x in ["banque", "credit", "bnp", "societe generale"]):
+    if any(x in f for x in ["banque", "credit", "bnp"]):
         return "finance"
-
-    if any(x in f for x in ["consult", "service", "solution"]):
-        return "service"
 
     return "autre"
 
@@ -87,12 +78,10 @@ def analyze_email(content: str):
     client = get_client()
 
     prompt = f"""
-Tu es un assistant administratif professionnel.
-
 Analyse cet email et retourne :
 - catégorie
-- résumé (1 phrase)
-- réponse professionnelle
+- résumé
+- réponse pro
 
 Email :
 {content}
@@ -112,7 +101,7 @@ Email :
 
 
 # =========================
-# 📄 FACTURE
+# 📄 FACTURE (SANS OCR)
 # =========================
 @app.post("/invoice")
 async def analyze_invoice(file: UploadFile = File(...)):
@@ -125,11 +114,11 @@ async def analyze_invoice(file: UploadFile = File(...)):
         with open(file_location, "wb") as f:
             f.write(await file.read())
 
-        # OCR
-        text = pytesseract.image_to_string(Image.open(file_location))
+        # 👉 Pas de Tesseract (Railway incompatible)
+        text = "Facture image reçue"
 
         prompt = f"""
-Analyse cette facture et retourne STRICTEMENT un JSON :
+Analyse cette facture et retourne JSON :
 
 {{
   "fournisseur": "...",
@@ -154,17 +143,16 @@ Texte :
         except:
             parsed = {"error": "Parsing échoué", "raw": cleaned}
 
-        # 💰 montant
+        # montant
         try:
             montant = parsed.get("montant", "0")
-            montant = montant.replace("€", "").replace(",", ".").strip()
+            montant = montant.replace("€", "").replace(",", ".")
             parsed["montant"] = str(float(montant))
         except:
             parsed["montant"] = "0"
 
-        # 🏷️ catégorie
-        fournisseur = parsed.get("fournisseur", "")
-        parsed["categorie"] = detect_category(fournisseur)
+        # catégorie
+        parsed["categorie"] = detect_category(parsed.get("fournisseur", ""))
 
         db.add(Analysis(type="facture", content=json.dumps(parsed)))
         db.commit()
@@ -176,18 +164,7 @@ Texte :
 
 
 # =========================
-# 📊 HISTORIQUE
-# =========================
-@app.get("/history")
-def get_history():
-    db = SessionLocal()
-    data = db.query(Analysis).all()
-
-    return [{"type": i.type, "content": i.content} for i in data]
-
-
-# =========================
-# 📈 STATS
+# 📊 STATS
 # =========================
 @app.get("/stats")
 def get_stats():
