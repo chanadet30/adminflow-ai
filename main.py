@@ -3,9 +3,12 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+import json
+
+# OCR (optionnel)
 import pytesseract
 from PIL import Image
-import json
+import shutil
 
 # DB
 from database import SessionLocal, engine
@@ -22,7 +25,7 @@ app = FastAPI()
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],  # autorise Railway + frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,8 +34,9 @@ app.add_middleware(
 # OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# OCR
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# OCR config (compatible Railway)
+if shutil.which("tesseract"):
+    pytesseract.pytesseract.tesseract_cmd = "tesseract"
 
 
 # =========================
@@ -81,8 +85,6 @@ def analyze_email(content: str):
     db = SessionLocal()
 
     prompt = f"""
-Tu es un assistant administratif professionnel.
-
 Analyse cet email et retourne :
 - catégorie
 - résumé (1 phrase)
@@ -118,10 +120,13 @@ async def analyze_invoice(file: UploadFile = File(...)):
         with open(file_location, "wb") as f:
             f.write(await file.read())
 
-        # OCR
-        text = pytesseract.image_to_string(Image.open(file_location))
+        # OCR (si dispo)
+        text = ""
+        if shutil.which("tesseract"):
+            text = pytesseract.image_to_string(Image.open(file_location))
+        else:
+            text = "OCR non disponible"
 
-        # IA extraction simple
         prompt = f"""
 Analyse cette facture et retourne STRICTEMENT un JSON :
 
@@ -142,18 +147,14 @@ Texte :
 
         raw = response.choices[0].message.content
 
-        # Nettoyage JSON
         cleaned = raw.replace("```json", "").replace("```", "").strip()
 
         try:
             parsed = json.loads(cleaned)
         except:
-            parsed = {
-                "error": "Parsing échoué",
-                "raw": cleaned
-            }
+            parsed = {"error": "Parsing échoué", "raw": cleaned}
 
-        # 💰 NORMALISATION MONTANT
+        # Normalisation montant
         try:
             montant = parsed.get("montant", "0")
             montant = montant.replace("€", "").replace(",", ".").strip()
@@ -161,11 +162,9 @@ Texte :
         except:
             parsed["montant"] = "0"
 
-        # 🏷️ CATÉGORIE AUTOMATIQUE
         fournisseur = parsed.get("fournisseur", "")
         parsed["categorie"] = detect_category(fournisseur)
 
-        # 💾 DB
         db.add(Analysis(type="facture", content=json.dumps(parsed)))
         db.commit()
 
@@ -190,7 +189,7 @@ def get_history():
 
 
 # =========================
-# 📈 STATS SIMPLES
+# 📈 STATS
 # =========================
 @app.get("/stats")
 def get_stats():
@@ -236,10 +235,8 @@ def advanced_stats():
                 cat = parsed.get("categorie", "autre")
                 date = parsed.get("date", "2025-01-01")
 
-                # 📊 catégories
                 categories[cat] = categories.get(cat, 0) + montant
 
-                # 📅 mensuel
                 month = date[:7]
                 monthly[month] = monthly.get(month, 0) + montant
 
