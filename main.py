@@ -1,8 +1,10 @@
 from fastapi import FastAPI, UploadFile, File
+from pydantic import BaseModel
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+import pytesseract
 from PIL import Image
 import json
 
@@ -18,7 +20,7 @@ load_dotenv()
 
 app = FastAPI()
 
-# CORS
+# CORS (important pour frontend)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,16 +29,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =========================
-# 🔐 OPENAI SAFE INIT
-# =========================
-def get_client():
-    api_key = os.getenv("OPENAI_API_KEY")
+# OpenAI (safe pour Railway)
+client = None
+if os.getenv("OPENAI_API_KEY"):
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    if not api_key:
-        raise Exception("OPENAI_API_KEY manquante")
+# OCR (local seulement, pas utilisé sur Railway)
+try:
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+except:
+    pass
 
-    return OpenAI(api_key=api_key)
+
+# =========================
+# 📩 MODELE EMAIL
+# =========================
+class EmailRequest(BaseModel):
+    content: str
 
 
 # =========================
@@ -47,16 +56,24 @@ def detect_category(fournisseur):
 
     if any(x in f for x in ["edf", "engie", "energie"]):
         return "energie"
+
     if any(x in f for x in ["orange", "sfr", "bouygues", "free"]):
         return "telecom"
+
     if any(x in f for x in ["sncf", "uber", "ratp", "taxi"]):
         return "transport"
+
     if any(x in f for x in ["netflix", "spotify", "amazon"]):
         return "abonnement"
-    if any(x in f for x in ["loyer", "rent"]):
+
+    if any(x in f for x in ["loyer", "rent", "immobilier"]):
         return "loyer"
-    if any(x in f for x in ["banque", "credit", "bnp"]):
+
+    if any(x in f for x in ["banque", "credit", "bnp", "societe generale"]):
         return "finance"
+
+    if any(x in f for x in ["consult", "service", "solution"]):
+        return "service"
 
     return "autre"
 
@@ -73,18 +90,22 @@ def root():
 # 📧 EMAIL
 # =========================
 @app.post("/email")
-def analyze_email(content: str):
+def analyze_email(request: EmailRequest):
     db = SessionLocal()
-    client = get_client()
+
+    if not client:
+        return {"error": "OpenAI API key missing"}
 
     prompt = f"""
+Tu es un assistant administratif professionnel.
+
 Analyse cet email et retourne :
 - catégorie
-- résumé
-- réponse pro
+- résumé (1 phrase)
+- réponse professionnelle
 
 Email :
-{content}
+{request.content}
 """
 
     response = client.chat.completions.create(
@@ -101,12 +122,11 @@ Email :
 
 
 # =========================
-# 📄 FACTURE (SANS OCR)
+# 📄 FACTURE
 # =========================
 @app.post("/invoice")
 async def analyze_invoice(file: UploadFile = File(...)):
     db = SessionLocal()
-    client = get_client()
 
     try:
         file_location = f"temp_{file.filename}"
@@ -114,11 +134,11 @@ async def analyze_invoice(file: UploadFile = File(...)):
         with open(file_location, "wb") as f:
             f.write(await file.read())
 
-        # 👉 Pas de Tesseract (Railway incompatible)
-        text = "Facture image reçue"
+        # OCR
+        text = pytesseract.image_to_string(Image.open(file_location))
 
         prompt = f"""
-Analyse cette facture et retourne JSON :
+Analyse cette facture et retourne STRICTEMENT un JSON :
 
 {{
   "fournisseur": "...",
@@ -129,6 +149,9 @@ Analyse cette facture et retourne JSON :
 Texte :
 {text}
 """
+
+        if not client:
+            return {"error": "OpenAI API key missing"}
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -143,16 +166,17 @@ Texte :
         except:
             parsed = {"error": "Parsing échoué", "raw": cleaned}
 
-        # montant
+        # 💰 montant
         try:
             montant = parsed.get("montant", "0")
-            montant = montant.replace("€", "").replace(",", ".")
+            montant = montant.replace("€", "").replace(",", ".").strip()
             parsed["montant"] = str(float(montant))
         except:
             parsed["montant"] = "0"
 
-        # catégorie
-        parsed["categorie"] = detect_category(parsed.get("fournisseur", ""))
+        # 🏷️ catégorie
+        fournisseur = parsed.get("fournisseur", "")
+        parsed["categorie"] = detect_category(fournisseur)
 
         db.add(Analysis(type="facture", content=json.dumps(parsed)))
         db.commit()
@@ -164,7 +188,18 @@ Texte :
 
 
 # =========================
-# 📊 STATS
+# 📊 HISTORIQUE
+# =========================
+@app.get("/history")
+def get_history():
+    db = SessionLocal()
+    data = db.query(Analysis).all()
+
+    return [{"type": item.type, "content": item.content} for item in data]
+
+
+# =========================
+# 📈 STATS
 # =========================
 @app.get("/stats")
 def get_stats():
@@ -178,10 +213,11 @@ def get_stats():
         if item.type == "facture":
             try:
                 parsed = json.loads(item.content)
-                total += float(parsed.get("montant", "0"))
+                montant = float(parsed.get("montant", "0"))
+                total += montant
                 count += 1
             except:
-                pass
+                continue
 
     return {
         "total_depenses": total,
