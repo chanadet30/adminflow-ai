@@ -5,3 +5,4 @@ pillow
 pytesseract
 python-dotenv
 openai
+sqlalchemy
