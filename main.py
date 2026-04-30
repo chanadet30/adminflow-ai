@@ -1,35 +1,84 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 
 app = FastAPI()
 
-# 🔥 CORS (CORRECTION ICI)
+# =========================
+# 🌐 CORS (FRONTEND LOCAL)
+# =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # 👈 IMPORTANT (pas "*")
+    allow_origins=["http://localhost:3000"],  # frontend Next.js
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# =========================
+# 🔑 OpenAI
+# =========================
 client = OpenAI()
 
+# =========================
+# ROOT
+# =========================
+@app.get("/")
+def root():
+    return {"status": "AdminFlow AI OK 🚀"}
+
+# =========================
+# 📧 MODEL
+# =========================
 class EmailRequest(BaseModel):
     content: str
 
-@app.get("/")
-def root():
-    return {"status": "OK"}
-
+# =========================
+# 📧 EMAIL ANALYSIS
+# =========================
 @app.post("/email")
 def analyze_email(request: EmailRequest):
     try:
         response = client.responses.create(
             model="gpt-4.1-mini",
-            input=request.content
+            input=f"""
+Tu es un assistant administratif professionnel.
+
+Analyse cet email et retourne :
+- catégorie
+- résumé (1 phrase)
+- réponse professionnelle
+
+Email :
+{request.content}
+"""
         )
+
         return {"result": response.output_text}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+# =========================
+# 📄 INVOICE ANALYSIS (SIMPLE VERSION)
+# =========================
+@app.post("/invoice")
+async def analyze_invoice(file: UploadFile = File(...)):
+    try:
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=f"""
+Un utilisateur a uploadé une facture nommée : {file.filename}
+
+Donne :
+- type de document
+- informations possibles (montant, date, fournisseur)
+- résumé rapide
+"""
+        )
+
+        return {"result": response.output_text}
+
     except Exception as e:
         return {"error": str(e)}
