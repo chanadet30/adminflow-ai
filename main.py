@@ -8,15 +8,25 @@ load_dotenv()
 
 app = FastAPI()
 
+# =========================
 # 🔑 OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# =========================
+API_KEY = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(api_key=API_KEY) if API_KEY else None
+
+print("API KEY LOADED:", API_KEY is not None)
+
 
 # =========================
 # ROOT
 # =========================
 @app.get("/")
 def root():
-    return {"status": "AdminFlow AI OK 🚀"}
+    return {
+        "status": "AdminFlow AI OK 🚀",
+        "api_key_loaded": API_KEY is not None
+    }
 
 
 # =========================
@@ -31,24 +41,30 @@ class EmailRequest(BaseModel):
 # =========================
 @app.post("/email")
 def analyze_email(request: EmailRequest):
+    try:
+        if not client:
+            return {"error": "OpenAI API key missing"}
 
-    prompt = f"""
+        prompt = f"""
 Tu es un assistant administratif professionnel.
 
-Analyse cet email et retourne :
+Analyse cet email et donne :
 - catégorie
-- résumé (1 phrase)
-- réponse professionnelle
+- résumé
+- réponse pro
 
 Email :
 {request.content}
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
-    )
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # 👈 modèle stable
+            messages=[{"role": "user", "content": prompt}]
+        )
 
-    result = response.choices[0].message.content
+        result = response.choices[0].message.content
 
-    return {"result": result}
+        return {"result": result}
+
+    except Exception as e:
+        return {"error": str(e)}
