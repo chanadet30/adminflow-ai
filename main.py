@@ -1,68 +1,53 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from openai import OpenAI
 import os
 from dotenv import load_dotenv
 
-# Charger .env
 load_dotenv()
 
 app = FastAPI()
-
-# =========================
-# 🔑 DEBUG API KEY
-# =========================
-API_KEY = os.getenv("OPENAI_API_KEY")
-
-print("API KEY LOADED:", API_KEY is not None)
-
 
 # =========================
 # ROOT
 # =========================
 @app.get("/")
 def root():
-    return {
-        "status": "AdminFlow AI OK 🚀",
-        "api_key_loaded": API_KEY is not None
-    }
+    return {"status": "AdminFlow AI OK 🚀"}
 
 
 # =========================
-# 📧 MODELE
+# MODEL
 # =========================
 class EmailRequest(BaseModel):
     content: str
 
 
 # =========================
-# 📧 EMAIL (NOUVELLE API OPENAI)
+# EMAIL
 # =========================
 @app.post("/email")
 def analyze_email(request: EmailRequest):
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=API_KEY)
+        # 👉 IMPORTANT : pas de api_key=...
+        client = OpenAI()
 
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=f"""
-Tu es un assistant administratif professionnel.
+Tu es un assistant administratif.
 
-Analyse cet email et retourne :
+Analyse cet email et donne :
 - catégorie
-- résumé (1 phrase)
-- réponse professionnelle
+- résumé
+- réponse pro
 
 Email :
 {request.content}
 """
         )
 
-        # récupération du texte
-        result = response.output[0].content[0].text
-
-        return {"result": result}
+        return {"result": response.output_text}
 
     except Exception as e:
         return {"error": str(e)}
