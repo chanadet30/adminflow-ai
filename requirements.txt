@@ -7,3 +7,11 @@ python-dotenv
 openai
 sqlalchemy
 PyPDF2
+stripe
+
+# 🔐 sécurité auth
+passlib[bcrypt]
+python-jose
+
+# 🧠 utile en prod
+psycopg2-binary
