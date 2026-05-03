@@ -86,7 +86,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],  # ⚠️ en prod limiter
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -128,7 +128,6 @@ def login(data: AuthRequest, db: Session = Depends(get_db)):
         raise HTTPException(401, "Invalid credentials")
 
     token = create_access_token({"sub": user.email})
-
     return {"access_token": token}
 
 # =========================
@@ -143,6 +142,21 @@ def get_me(user_email: str = Depends(get_current_user), db: Session = Depends(ge
         "usage": user.usage,
         "premium": user.premium
     }
+
+# =========================
+# DEBUG PREMIUM
+# =========================
+@app.get("/force-premium")
+def force_premium(email: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user:
+        return {"error": "user not found"}
+
+    user.premium = True
+    db.commit()
+
+    return {"status": "premium activé"}
 
 # =========================
 # EMAIL IA
@@ -181,7 +195,7 @@ Email :
     }
 
 # =========================
-# FACTURE IA (VISION)
+# FACTURE IA
 # =========================
 @app.post("/invoice")
 async def analyze_invoice(
@@ -198,7 +212,6 @@ async def analyze_invoice(
         raise HTTPException(403, "Premium required")
 
     content = await file.read()
-
     base64_file = base64.b64encode(content).decode("utf-8")
 
     response = client.responses.create(
@@ -208,14 +221,7 @@ async def analyze_invoice(
             "content": [
                 {
                     "type": "input_text",
-                    "text": """
-Analyse cette facture et retourne :
-- Fournisseur
-- Montant
-- TVA
-- Date
-- Type (facture / devis)
-"""
+                    "text": "Analyse cette facture et donne montant, TVA, date, fournisseur"
                 },
                 {
                     "type": "input_image",
@@ -228,9 +234,7 @@ Analyse cette facture et retourne :
     user.usage += 1
     db.commit()
 
-    return {
-        "result": response.output_text
-    }
+    return {"result": response.output_text}
 
 # =========================
 # STRIPE CHECKOUT
@@ -259,7 +263,7 @@ def create_checkout(user_email: str = Depends(get_current_user)):
     return {"url": session.url}
 
 # =========================
-# STRIPE WEBHOOK SECURISÉ
+# STRIPE WEBHOOK
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
