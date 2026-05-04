@@ -6,9 +6,14 @@ from pydantic import BaseModel
 from jose import jwt, JWTError
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from sqlalchemy import create_engine, Column, String, Boolean
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+# =========================
+# CONFIG
+# =========================
 app = FastAPI()
 
-# CORS (important pour frontend)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,7 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ENV VARIABLES
+# ENV
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
@@ -26,66 +31,95 @@ print("🔐 WEBHOOK SECRET:", STRIPE_WEBHOOK_SECRET)
 
 stripe.api_key = STRIPE_SECRET_KEY
 
-# FAKE DB (temporaire)
-users = {}
-
 SECRET_KEY = "secret"
 ALGORITHM = "HS256"
 
 security = HTTPBearer()
 
-# =====================
-# AUTH
-# =====================
+# =========================
+# DB
+# =========================
+DATABASE_URL = "sqlite:///./adminflow.db"
 
-class User(BaseModel):
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+
+    email = Column(String, primary_key=True, index=True)
+    password = Column(String)
+    premium = Column(Boolean, default=False)
+
+Base.metadata.create_all(bind=engine)
+
+# =========================
+# AUTH
+# =========================
+class AuthRequest(BaseModel):
     email: str
     password: str
 
 def create_token(email):
-    return jwt.encode({"email": email}, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode({"sub": email}, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload["email"]
+        return payload.get("sub")
     except JWTError:
         raise HTTPException(status_code=403, detail="Invalid token")
 
-# =====================
-# ROUTES
-# =====================
-
+# =========================
+# AUTH ROUTES
+# =========================
 @app.post("/login")
-def login(user: User):
-    users[user.email] = {
-        "premium": False,
-        "email": user.email
-    }
-    return {"access_token": create_token(user.email)}
+def login(data: AuthRequest):
+    db = SessionLocal()
+
+    user = db.query(User).filter(User.email == data.email).first()
+
+    if not user:
+        user = User(email=data.email, password=data.password)
+        db.add(user)
+        db.commit()
+
+    token = create_token(data.email)
+
+    return {"access_token": token}
 
 @app.get("/me")
-def me(email: str = Depends(get_current_user)):
-    return users.get(email, {"email": email, "premium": False})
+def me(user_email: str = Depends(get_current_user)):
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == user_email).first()
 
-# =====================
+    return {
+        "email": user.email,
+        "premium": user.premium
+    }
+
+# =========================
 # STRIPE CHECKOUT
-# =====================
-
+# =========================
 @app.post("/create-checkout-session")
-def create_checkout(email: str = Depends(get_current_user)):
+def create_checkout(user_email: str = Depends(get_current_user)):
+
+    customer = stripe.Customer.create(
+        email=user_email
+    )
+
     session = stripe.checkout.Session.create(
+        customer=customer.id,
         payment_method_types=["card"],
-        mode="payment",
-        customer_email=email,
+        mode="subscription",
         line_items=[{
             "price_data": {
                 "currency": "eur",
-                "product_data": {
-                    "name": "AdminFlow Premium"
-                },
-                "unit_amount": 1000,
+                "product_data": {"name": "AdminFlow Premium"},
+                "unit_amount": 900,
+                "recurring": {"interval": "month"},
             },
             "quantity": 1,
         }],
@@ -95,10 +129,9 @@ def create_checkout(email: str = Depends(get_current_user)):
 
     return {"url": session.url}
 
-# =====================
-# WEBHOOK STRIPE
-# =====================
-
+# =========================
+# WEBHOOK STRIPE (FIX FINAL)
+# =========================
 @app.post("/webhook")
 async def webhook(request: Request):
     payload = await request.body()
@@ -112,18 +145,28 @@ async def webhook(request: Request):
         )
     except Exception as e:
         print("❌ Webhook error:", e)
-        raise HTTPException(status_code=400, detail="Webhook error")
+        raise HTTPException(status_code=400)
 
     print("📩 EVENT:", event["type"])
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        email = session.get("customer_email")
 
-        print("📧 EMAIL:", email)
+        customer_id = session.get("customer")
+        print("🧾 CUSTOMER:", customer_id)
 
-        if email in users:
-            users[email]["premium"] = True
-            print("🔥 PREMIUM ACTIVÉ")
+        if customer_id:
+            customer = stripe.Customer.retrieve(customer_id)
+            email = customer.get("email")
+
+            print("📧 EMAIL:", email)
+
+            db = SessionLocal()
+            user = db.query(User).filter(User.email == email).first()
+
+            if user:
+                user.premium = True
+                db.commit()
+                print("🔥 PREMIUM ACTIVÉ")
 
     return {"status": "ok"}
