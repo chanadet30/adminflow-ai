@@ -11,27 +11,16 @@ export default function Dashboard() {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // -------------------------
-  // LOAD USER
-  // -------------------------
   const loadUser = async () => {
     const res = await fetch(`${API}/me`);
     const data = await res.json();
     setUser(data);
   };
 
-  // -------------------------
-  // LOAD HISTORY
-  // -------------------------
   const loadHistory = async () => {
     const res = await fetch(`${API}/history`);
     const data = await res.json();
-
-    if (Array.isArray(data)) {
-      setHistory(data);
-    } else {
-      setHistory([]);
-    }
+    setHistory(Array.isArray(data) ? data : []);
   };
 
   useEffect(() => {
@@ -39,14 +28,8 @@ export default function Dashboard() {
     loadHistory();
   }, []);
 
-  // -------------------------
-  // ANALYSE
-  // -------------------------
   const analyze = async () => {
-    if (!content.trim()) {
-      alert("Ajoute un email");
-      return;
-    }
+    if (!content.trim()) return;
 
     setLoading(true);
 
@@ -60,9 +43,8 @@ export default function Dashboard() {
 
     const data = await res.json();
 
-    // 🔒 LIMIT FREE → conversion
     if (data.error === "LIMIT_REACHED") {
-      if (confirm("🚀 Tu as atteint la limite gratuite.\nPasser Premium maintenant ?")) {
+      if (confirm("🚀 Passe Premium pour continuer")) {
         upgrade();
       }
       setLoading(false);
@@ -77,105 +59,143 @@ export default function Dashboard() {
     setLoading(false);
   };
 
-  // -------------------------
-  // STRIPE UPGRADE
-  // -------------------------
   const upgrade = async () => {
     const res = await fetch(`${API}/create-checkout-session`, {
       method: "POST",
     });
 
     const data = await res.json();
-
     window.location.href = data.url;
   };
 
-  // -------------------------
-  // UI
-  // -------------------------
+  const extractReply = (text: string) => {
+    const parts = text.split("✉️ Réponse suggérée :");
+    return parts[1] ? parts[1].trim() : text;
+  };
+
+  const reply = extractReply(result);
+
   return (
-    <div className="min-h-screen bg-gray-100 flex">
+    <div className="min-h-screen bg-[#f7f8fa] flex">
 
       {/* SIDEBAR */}
-      <aside className="w-64 bg-white border-r p-6 flex flex-col">
-        <h2 className="text-xl font-bold mb-10 text-indigo-600">
-          AdminFlow
-        </h2>
+      <aside className="w-64 bg-white border-r px-6 py-8 flex flex-col justify-between">
 
-        <div className="mt-auto">
+        <div>
+          <h2 className="text-xl font-semibold text-indigo-600 mb-10">
+            AdminFlow
+          </h2>
 
-          {/* STATUS */}
-          <div className="mb-4">
-            {user?.premium ? (
-              <span className="text-green-600 font-semibold">
-                💎 Premium actif
-              </span>
-            ) : (
-              <span className="text-gray-500">
-                Plan gratuit (3 analyses)
-              </span>
-            )}
+          <div className="space-y-4 text-sm text-gray-600">
+            <p>📊 Dashboard</p>
+            <p className="opacity-40">Historique</p>
           </div>
+        </div>
 
-          {/* UPGRADE */}
-          {!user?.premium && (
-            <button
-              onClick={upgrade}
-              className="bg-indigo-600 text-white px-4 py-2 rounded w-full hover:bg-indigo-700"
-            >
-              💎 Débloquer illimité (9€/mois)
-            </button>
+        <div className="text-sm">
+
+          {user?.premium ? (
+            <div className="bg-green-100 text-green-700 px-3 py-2 rounded-lg">
+              💎 Premium actif
+            </div>
+          ) : (
+            <div>
+              <p className="text-gray-500 mb-2">
+                Plan gratuit
+              </p>
+
+              <button
+                onClick={upgrade}
+                className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition"
+              >
+                💎 Passer Premium
+              </button>
+            </div>
           )}
 
         </div>
+
       </aside>
 
       {/* MAIN */}
       <main className="flex-1 p-10">
 
-        <h1 className="text-3xl font-bold mb-6">
-          Dashboard
-        </h1>
+        {/* HEADER */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-semibold">
+            Dashboard
+          </h1>
 
-        {/* USAGE */}
-        <p className="text-sm text-gray-500 mb-4">
-          Utilisation : {history.length} / {user?.premium ? "∞" : "3"}
-        </p>
+          <p className="text-gray-500 text-sm mt-1">
+            Utilisation : {history.length} / {user?.premium ? "∞" : "3"}
+          </p>
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-          {/* ANALYSE */}
-          <div className="bg-white p-6 rounded-xl shadow">
+          {/* ANALYSE CARD */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border">
 
             <textarea
-              placeholder="Colle un email..."
+              placeholder="Colle ton email ici..."
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              className="w-full p-4 border rounded mb-4"
+              className="w-full p-4 border rounded-lg mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
 
             <button
               onClick={analyze}
-              className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
+              className="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 transition"
             >
               {loading ? "Analyse..." : "Analyser"}
             </button>
 
             {result && (
-              <div className="mt-4 bg-gray-50 p-3 rounded">
-                <pre>{result}</pre>
+              <div className="mt-6 space-y-4">
+
+                {/* REPLY */}
+                <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl">
+                  <p className="text-xs text-indigo-500 mb-2">
+                    Réponse prête
+                  </p>
+
+                  <p className="text-sm whitespace-pre-wrap">
+                    {reply}
+                  </p>
+                </div>
+
+                {/* COPY */}
+                <button
+                  onClick={() => navigator.clipboard.writeText(reply)}
+                  className="text-xs text-indigo-600 hover:underline"
+                >
+                  Copier la réponse
+                </button>
+
+                {/* FULL */}
+                <details className="text-sm text-gray-500">
+                  <summary className="cursor-pointer">
+                    Voir analyse complète
+                  </summary>
+
+                  <pre className="mt-2 whitespace-pre-wrap">
+                    {result}
+                  </pre>
+                </details>
+
               </div>
             )}
+
           </div>
 
-          {/* HISTORIQUE */}
-          <div className="bg-white p-6 rounded-xl shadow">
+          {/* HISTORY */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border">
 
-            <h3 className="font-bold mb-4">
+            <h3 className="font-semibold mb-4">
               Historique
             </h3>
 
-            <div className="space-y-3 max-h-96 overflow-auto">
+            <div className="space-y-3 max-h-[500px] overflow-auto">
 
               {history.length === 0 && (
                 <p className="text-gray-400 text-sm">
@@ -186,20 +206,22 @@ export default function Dashboard() {
               {history.map((h, i) => (
                 <div
                   key={i}
-                  className="p-3 bg-gray-50 rounded border"
+                  className="p-3 bg-gray-50 rounded-lg text-sm"
                 >
-                  <p className="text-xs text-gray-500 mb-1">
+                  <p className="text-gray-500 text-xs mb-1">
                     Email
                   </p>
-                  <p className="text-sm truncate">
+
+                  <p className="truncate">
                     {h.content}
                   </p>
 
-                  <p className="text-xs text-gray-500 mt-2">
-                    Résultat
+                  <p className="text-gray-400 text-xs mt-2">
+                    Réponse
                   </p>
-                  <p className="text-sm truncate">
-                    {h.result}
+
+                  <p className="truncate">
+                    {extractReply(h.result)}
                   </p>
                 </div>
               ))}
