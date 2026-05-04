@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import stripe
 import os
+
 from database import SessionLocal, engine, Base
 import models
 
@@ -12,10 +13,10 @@ import models
 
 app = FastAPI()
 
-# 🔥 CORS FIX
+# 🔥 CORS (corrige ton erreur précédente)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # en prod tu peux restreindre
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,14 +42,13 @@ def get_db():
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
+PRICE_ID = "price_1TTM341e5DKL1tszQvMtQJ7C"
+
 print("🔐 STRIPE KEY:", stripe.api_key)
 print("🔐 WEBHOOK SECRET:", WEBHOOK_SECRET)
 
-# 👉 TON PRICE ID
-PRICE_ID = "price_1TTM341e5DKL1tszQvMtQJ7C"
-
 # -------------------------
-# USER TEMP
+# USER TEMP (remplacera auth plus tard)
 # -------------------------
 
 CURRENT_USER_EMAIL = "chanadet30@gmail.com"
@@ -87,6 +87,10 @@ def get_history(db: Session = Depends(get_db)):
     ]
 
 
+# -------------------------
+# ANALYSE EMAIL + LIMIT FREE
+# -------------------------
+
 @app.post("/email")
 async def analyze_email(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
@@ -95,7 +99,26 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
     if not content:
         return {"result": "Aucun contenu"}
 
-    # 🔥 SIMULATION IA
+    # 👤 récupérer user
+    user = db.query(models.User).filter(
+        models.User.email == CURRENT_USER_EMAIL
+    ).first()
+
+    if not user:
+        user = models.User(email=CURRENT_USER_EMAIL, premium=False)
+        db.add(user)
+        db.commit()
+
+    # 🔒 LIMIT FREE (3 analyses)
+    if not user.premium:
+        count = db.query(models.Email).filter(
+            models.Email.user_email == CURRENT_USER_EMAIL
+        ).count()
+
+        if count >= 3:
+            return {"error": "LIMIT_REACHED"}
+
+    # 🤖 SIMULATION IA
     result = f"Analyse IA:\n{content[:300]}..."
 
     new_email = models.Email(
@@ -132,7 +155,7 @@ def create_checkout():
 
 
 # -------------------------
-# WEBHOOK
+# STRIPE WEBHOOK
 # -------------------------
 
 @app.post("/webhook")
@@ -150,7 +173,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
     print("📩 EVENT:", event["type"])
 
-    # 💳 paiement validé
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
 
