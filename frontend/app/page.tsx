@@ -1,79 +1,89 @@
-export default function Landing() {
+"use client";
+
+export default function Home() {
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-white">
 
       {/* HERO */}
-      <section className="flex flex-col items-center justify-center text-center px-6 py-24">
+      <section className="text-center py-20 px-6">
         <h1 className="text-5xl font-bold mb-6">
-          AdminFlow
+          Gagne du temps sur tes emails
         </h1>
 
-        <p className="text-xl text-gray-600 mb-8 max-w-2xl">
-          Automatise tes emails et factures avec l’IA. Gagne des heures chaque semaine.
+        <p className="text-gray-600 mb-8 text-lg">
+          Analyse automatiquement tes emails et obtiens une réponse claire en quelques secondes.
         </p>
 
         <a
           href="/dashboard"
-          className="bg-indigo-600 text-white px-8 py-4 rounded-xl text-lg shadow hover:scale-105 transition"
+          className="bg-indigo-600 text-white px-6 py-3 rounded text-lg hover:bg-indigo-700"
         >
-          Essayer gratuitement
+          🚀 Commencer gratuitement
         </a>
       </section>
 
       {/* FEATURES */}
       <section className="grid md:grid-cols-3 gap-8 px-10 py-20 bg-gray-50">
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="font-semibold mb-2">📧 Emails intelligents</h3>
+
+        <div>
+          <h3 className="font-bold text-lg mb-2">⚡ Rapide</h3>
           <p className="text-gray-600">
-            Analyse automatique et réponses prêtes à envoyer.
+            Analyse instantanée de tes emails
           </p>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="font-semibold mb-2">📄 Factures automatiques</h3>
+        <div>
+          <h3 className="font-bold text-lg mb-2">🤖 Intelligent</h3>
           <p className="text-gray-600">
-            Extraction des données et organisation instantanée.
+            Résumés clairs et exploitables
           </p>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="font-semibold mb-2">⚡ Gain de temps</h3>
+        <div>
+          <h3 className="font-bold text-lg mb-2">💎 Premium</h3>
           <p className="text-gray-600">
-            Automatise tes tâches administratives en un clic.
+            Analyses illimitées pour aller plus loin
           </p>
         </div>
+
       </section>
 
       {/* PRICING */}
-      <section className="py-20 text-center">
+      <section className="text-center py-20">
+
         <h2 className="text-3xl font-bold mb-10">
-          Tarification simple
+          Simple et transparent
         </h2>
 
-        <div className="flex flex-col md:flex-row justify-center gap-6">
+        <div className="flex justify-center gap-10">
 
-          {/* FREE */}
-          <div className="border p-8 rounded-xl w-80">
-            <h3 className="text-xl font-semibold mb-4">Gratuit</h3>
-            <p className="mb-4">Essai limité</p>
-            <p className="text-3xl font-bold mb-6">0€</p>
-          </div>
-
-          {/* PREMIUM */}
-          <div className="border-2 border-indigo-600 p-8 rounded-xl w-80">
-            <h3 className="text-xl font-semibold mb-4">Premium</h3>
-            <p className="mb-4">Accès complet</p>
-            <p className="text-3xl font-bold mb-6">9€/mois</p>
-
-            <a
-              href="/dashboard"
-              className="bg-indigo-600 text-white px-6 py-3 rounded-lg"
-            >
+          <div className="border p-6 rounded w-60">
+            <h3 className="font-bold mb-2">Gratuit</h3>
+            <p className="text-2xl mb-4">0€</p>
+            <p className="text-gray-600 mb-4">
+              3 analyses
+            </p>
+            <a href="/dashboard" className="text-indigo-600">
               Commencer
             </a>
           </div>
 
+          <div className="border p-6 rounded w-60 bg-indigo-50">
+            <h3 className="font-bold mb-2">Premium</h3>
+            <p className="text-2xl mb-4">9€/mois</p>
+            <p className="text-gray-600 mb-4">
+              Illimité
+            </p>
+            <a
+              href="/dashboard"
+              className="bg-indigo-600 text-white px-4 py-2 rounded"
+            >
+              Passer Premium
+            </a>
+          </div>
+
         </div>
+
       </section>
 
     </div>

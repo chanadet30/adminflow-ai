@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import stripe
 import os
+from openai import OpenAI
 
 from database import SessionLocal, engine, Base
 import models
@@ -30,16 +31,15 @@ def get_db():
         db.close()
 
 # -------------------------
-# STRIPE
+# CONFIG
 # -------------------------
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 PRICE_ID = "price_1TTM341e5DKL1tszQvMtQJ7C"
-
-print("🔐 STRIPE KEY:", stripe.api_key)
-print("🔐 WEBHOOK SECRET:", WEBHOOK_SECRET)
-
 CURRENT_USER_EMAIL = "chanadet30@gmail.com"
 
 # -------------------------
@@ -67,6 +67,9 @@ def get_history(db: Session = Depends(get_db)):
     return [{"content": e.content, "result": e.result} for e in emails]
 
 
+# -------------------------
+# IA ANALYSE EMAIL
+# -------------------------
 @app.post("/email")
 async def analyze_email(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
@@ -84,6 +87,7 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
 
+    # 🔒 LIMIT FREE
     if not user.premium:
         count = db.query(models.Email).filter(
             models.Email.user_email == CURRENT_USER_EMAIL
@@ -92,8 +96,40 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
         if count >= 3:
             return {"error": "LIMIT_REACHED"}
 
-    result = f"Analyse IA:\n{content[:300]}..."
+    # -------------------------
+    # 🧠 OPENAI ANALYSE
+    # -------------------------
+    prompt = f"""
+Tu es un assistant professionnel spécialisé dans l’analyse d’emails.
 
+Analyse cet email et réponds avec ce format EXACT :
+
+📌 Résumé :
+(1 phrase claire)
+
+🎯 Intention :
+(type : demande / plainte / info / urgence)
+
+✉️ Réponse suggérée :
+(rédige une réponse professionnelle prête à envoyer)
+
+EMAIL :
+{content}
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Assistant email professionnel"},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    result = response.choices[0].message.content
+
+    # -------------------------
+    # SAVE DB
+    # -------------------------
     new_email = models.Email(
         user_email=CURRENT_USER_EMAIL,
         content=content,
@@ -106,6 +142,9 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
     return {"result": result}
 
 
+# -------------------------
+# STRIPE CHECKOUT
+# -------------------------
 @app.post("/create-checkout-session")
 def create_checkout():
     session = stripe.checkout.Session.create(
@@ -124,7 +163,7 @@ def create_checkout():
 
 
 # -------------------------
-# WEBHOOK FIX FINAL
+# WEBHOOK
 # -------------------------
 @app.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
@@ -136,48 +175,40 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             payload, sig_header, WEBHOOK_SECRET
         )
     except Exception as e:
-        print("❌ Webhook signature error:", e)
+        print("❌ Webhook error:", e)
         return {"status": "error"}
 
     print("📩 EVENT:", event["type"])
 
-    try:
-        if event["type"] == "checkout.session.completed":
-            session = event["data"]["object"]
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
 
-            email = None
+        email = None
 
-            # 🔥 FIX principal
-            if hasattr(session, "customer_details") and session.customer_details:
-                email = session.customer_details.email
+        if session.customer_details:
+            email = session.customer_details.email
 
-            # 🔥 fallback
-            if not email and hasattr(session, "customer") and session.customer:
-                customer = stripe.Customer.retrieve(session.customer)
-                email = customer.email
+        if not email and session.customer:
+            customer = stripe.Customer.retrieve(session.customer)
+            email = customer.email
 
-            print("📧 EMAIL:", email)
+        print("📧 EMAIL:", email)
 
-            if not email:
-                print("❌ Aucun email trouvé")
-                return {"status": "error"}
+        if not email:
+            return {"status": "error"}
 
-            user = db.query(models.User).filter(
-                models.User.email == email
-            ).first()
+        user = db.query(models.User).filter(
+            models.User.email == email
+        ).first()
 
-            if not user:
-                user = models.User(email=email, premium=True)
-                db.add(user)
-            else:
-                user.premium = True
+        if not user:
+            user = models.User(email=email, premium=True)
+            db.add(user)
+        else:
+            user.premium = True
 
-            db.commit()
+        db.commit()
 
-            print("🔥 PREMIUM ACTIVÉ")
-
-    except Exception as e:
-        print("❌ WEBHOOK PROCESS ERROR:", e)
-        return {"status": "error"}
+        print("🔥 PREMIUM ACTIVÉ")
 
     return {"status": "success"}

@@ -40,7 +40,7 @@ export default function Dashboard() {
   }, []);
 
   // -------------------------
-  // ANALYZE
+  // ANALYSE
   // -------------------------
   const analyze = async () => {
     if (!content.trim()) {
@@ -60,9 +60,11 @@ export default function Dashboard() {
 
     const data = await res.json();
 
-    // 🔒 LIMIT FREE
+    // 🔒 LIMIT FREE → conversion
     if (data.error === "LIMIT_REACHED") {
-      alert("🚀 Passe Premium pour continuer");
+      if (confirm("🚀 Tu as atteint la limite gratuite.\nPasser Premium maintenant ?")) {
+        upgrade();
+      }
       setLoading(false);
       return;
     }
@@ -76,7 +78,7 @@ export default function Dashboard() {
   };
 
   // -------------------------
-  // UPGRADE
+  // STRIPE UPGRADE
   // -------------------------
   const upgrade = async () => {
     const res = await fetch(`${API}/create-checkout-session`, {
@@ -102,6 +104,7 @@ export default function Dashboard() {
 
         <div className="mt-auto">
 
+          {/* STATUS */}
           <div className="mb-4">
             {user?.premium ? (
               <span className="text-green-600 font-semibold">
@@ -109,17 +112,18 @@ export default function Dashboard() {
               </span>
             ) : (
               <span className="text-gray-500">
-                Free plan
+                Plan gratuit (3 analyses)
               </span>
             )}
           </div>
 
+          {/* UPGRADE */}
           {!user?.premium && (
             <button
               onClick={upgrade}
-              className="bg-indigo-600 text-white px-4 py-2 rounded w-full"
+              className="bg-indigo-600 text-white px-4 py-2 rounded w-full hover:bg-indigo-700"
             >
-              🚀 Passer Premium
+              💎 Débloquer illimité (9€/mois)
             </button>
           )}
 
@@ -132,6 +136,11 @@ export default function Dashboard() {
         <h1 className="text-3xl font-bold mb-6">
           Dashboard
         </h1>
+
+        {/* USAGE */}
+        <p className="text-sm text-gray-500 mb-4">
+          Utilisation : {history.length} / {user?.premium ? "∞" : "3"}
+        </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -147,7 +156,7 @@ export default function Dashboard() {
 
             <button
               onClick={analyze}
-              className="bg-indigo-600 text-white px-4 py-2 rounded"
+              className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
             >
               {loading ? "Analyse..." : "Analyser"}
             </button>
