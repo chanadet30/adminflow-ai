@@ -37,7 +37,7 @@ ALGORITHM = "HS256"
 security = HTTPBearer()
 
 # =========================
-# DB
+# DATABASE
 # =========================
 DATABASE_URL = "sqlite:///./adminflow.db"
 
@@ -149,15 +149,16 @@ async def webhook(request: Request):
 
     print("📩 EVENT:", event["type"])
 
+    # 🔥 CHECKOUT COMPLETED
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
 
-        customer_id = session.get("customer")
+        customer_id = session.customer
         print("🧾 CUSTOMER:", customer_id)
 
         if customer_id:
             customer = stripe.Customer.retrieve(customer_id)
-            email = customer.get("email")
+            email = customer.email
 
             print("📧 EMAIL:", email)
 
@@ -168,5 +169,23 @@ async def webhook(request: Request):
                 user.premium = True
                 db.commit()
                 print("🔥 PREMIUM ACTIVÉ")
+
+    # 🔥 BONUS sécurité : abonnement confirmé
+    if event["type"] == "invoice.paid":
+        invoice = event["data"]["object"]
+
+        customer_id = invoice.customer
+
+        if customer_id:
+            customer = stripe.Customer.retrieve(customer_id)
+            email = customer.email
+
+            db = SessionLocal()
+            user = db.query(User).filter(User.email == email).first()
+
+            if user:
+                user.premium = True
+                db.commit()
+                print("🔥 PREMIUM ACTIVÉ (invoice)")
 
     return {"status": "ok"}
