@@ -1,33 +1,26 @@
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import declarative_base
-
-Base = declarative_base()
-
-class Analysis(Base):
-    __tablename__ = "analyses"
-
-    id = Column(Integer, primary_key=True, index=True)
-    type = Column(String)
-    content = Column(String)
- # models.py
-
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean
 from database import Base
+
+# -------------------------
+# USER
+# -------------------------
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String)
+    email = Column(String, unique=True, index=True)
     premium = Column(Boolean, default=False)
-    usage = Column(Integer, default=0)
 
 
-# 🔥 NOUVEAU
-class History(Base):
-    __tablename__ = "history"
+# -------------------------
+# EMAIL ANALYSÉ
+# -------------------------
+
+class Email(Base):
+    __tablename__ = "emails"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_email = Column(String, index=True)
     content = Column(String)
-    result = Column(String)   
+    result = Column(String)

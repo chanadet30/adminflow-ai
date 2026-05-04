@@ -1,17 +1,18 @@
-# main.py
-
-import os
-import stripe
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine
+import stripe
+import os
+from database import SessionLocal, engine, Base
 import models
 
-models.Base.metadata.create_all(bind=engine)
+# -------------------------
+# INIT APP
+# -------------------------
 
 app = FastAPI()
 
+# 🔥 CORS FIX
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,10 +21,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+# -------------------------
+# DATABASE
+# -------------------------
 
-# DB
+Base.metadata.create_all(bind=engine)
+
 def get_db():
     db = SessionLocal()
     try:
@@ -31,115 +34,142 @@ def get_db():
     finally:
         db.close()
 
-# USER FAKE (simplifié pour ton setup actuel)
-def get_user(db: Session):
-    return db.query(models.User).first()
+# -------------------------
+# STRIPE CONFIG
+# -------------------------
 
-# =========================
-# 📧 ANALYSE EMAIL
-# =========================
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+print("🔐 STRIPE KEY:", stripe.api_key)
+print("🔐 WEBHOOK SECRET:", WEBHOOK_SECRET)
+
+# 👉 TON PRICE ID
+PRICE_ID = "price_1TTM341e5DKL1tszQvMtQJ7C"
+
+# -------------------------
+# USER TEMP
+# -------------------------
+
+CURRENT_USER_EMAIL = "chanadet30@gmail.com"
+
+# -------------------------
+# ROUTES
+# -------------------------
+
+@app.get("/me")
+def get_me(db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(
+        models.User.email == CURRENT_USER_EMAIL
+    ).first()
+
+    if not user:
+        return {"email": CURRENT_USER_EMAIL, "premium": False}
+
+    return {
+        "email": user.email,
+        "premium": user.premium
+    }
+
+
+@app.get("/history")
+def get_history(db: Session = Depends(get_db)):
+    emails = db.query(models.Email).filter(
+        models.Email.user_email == CURRENT_USER_EMAIL
+    ).order_by(models.Email.id.desc()).all()
+
+    return [
+        {
+            "content": e.content,
+            "result": e.result
+        }
+        for e in emails
+    ]
+
+
 @app.post("/email")
-def analyze_email(data: dict, db: Session = Depends(get_db)):
-    user = get_user(db)
+async def analyze_email(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    content = body.get("content")
 
-    content = data.get("content")
+    if not content:
+        return {"result": "Aucun contenu"}
 
-    result = f"Analyse IA simulée :\n\n{content[:200]}..."
+    # 🔥 SIMULATION IA
+    result = f"Analyse IA:\n{content[:300]}..."
 
-    # 🔥 SAUVEGARDE HISTORIQUE
-    history = models.History(
-        user_id=user.id,
+    new_email = models.Email(
+        user_email=CURRENT_USER_EMAIL,
         content=content,
         result=result
     )
-    db.add(history)
 
-    # incrément usage
-    user.usage = (user.usage or 0) + 1
-
+    db.add(new_email)
     db.commit()
 
     return {"result": result}
 
 
-# =========================
-# 📜 HISTORIQUE
-# =========================
-@app.get("/history")
-def get_history(db: Session = Depends(get_db)):
-    user = get_user(db)
+# -------------------------
+# STRIPE CHECKOUT
+# -------------------------
 
-    history = (
-        db.query(models.History)
-        .filter(models.History.user_id == user.id)
-        .order_by(models.History.id.desc())
-        .limit(10)
-        .all()
-    )
-
-    return [
-        {
-            "content": h.content,
-            "result": h.result
-        }
-        for h in history
-    ]
-
-
-# =========================
-# 👤 USER INFO
-# =========================
-@app.get("/me")
-def me(db: Session = Depends(get_db)):
-    user = get_user(db)
-
-    return {
-        "email": user.email,
-        "premium": user.premium,
-        "usage": user.usage,
-    }
-
-
-# =========================
-# 💳 STRIPE
-# =========================
 @app.post("/create-checkout-session")
-def create_checkout_session():
+def create_checkout():
     session = stripe.checkout.Session.create(
         payment_method_types=["card"],
         mode="subscription",
-        line_items=[
-            {
-                "price_data": {
-                    "currency": "eur",
-                    "product_data": {
-                        "name": "AdminFlow Premium",
-                    },
-                    "unit_amount": 900,
-                    "recurring": {"interval": "month"},
-                },
-                "quantity": 1,
-            }
-        ],
+        line_items=[{
+            "price": PRICE_ID,
+            "quantity": 1,
+        }],
         success_url="http://localhost:3000/dashboard",
         cancel_url="http://localhost:3000/dashboard",
+        customer_email=CURRENT_USER_EMAIL
     )
 
     return {"url": session.url}
 
+
+# -------------------------
+# WEBHOOK
+# -------------------------
 
 @app.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
 
-    event = stripe.Webhook.construct_event(
-        payload, sig_header, WEBHOOK_SECRET
-    )
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, WEBHOOK_SECRET
+        )
+    except Exception as e:
+        print("❌ Webhook error:", e)
+        return {"status": "error"}
 
+    print("📩 EVENT:", event["type"])
+
+    # 💳 paiement validé
     if event["type"] == "checkout.session.completed":
-        user = get_user(db)
-        user.premium = True
+        session = event["data"]["object"]
+
+        email = session.get("customer_email")
+
+        print("📧 EMAIL:", email)
+
+        user = db.query(models.User).filter(
+            models.User.email == email
+        ).first()
+
+        if not user:
+            user = models.User(email=email, premium=True)
+            db.add(user)
+        else:
+            user.premium = True
+
         db.commit()
 
-    return {"status": "ok"}
+        print("🔥 PREMIUM ACTIVÉ")
+
+    return {"status": "success"}
