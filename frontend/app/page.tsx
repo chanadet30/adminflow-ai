@@ -1,225 +1,81 @@
-"use client";
-
-import { useState, useEffect } from "react";
-import Image from "next/image";
-
-const API = "https://adminflow-ai-production.up.railway.app";
-
-export default function Home() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
-  const [user, setUser] = useState<any>(null);
-  const [content, setContent] = useState("");
-  const [result, setResult] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [invoiceResult, setInvoiceResult] = useState("");
-
-  // 🔑 Charger token au démarrage
-  useEffect(() => {
-    const t = localStorage.getItem("token");
-    if (t) setToken(t);
-  }, []);
-
-  // 👤 Charger user
-  const loadUser = async () => {
-    const res = await fetch(`${API}/me`, {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-      },
-    });
-    const data = await res.json();
-    setUser(data);
-  };
-
-  useEffect(() => {
-    if (token) loadUser();
-  }, [token]);
-
-  // 🔐 LOGIN
-  const login = async () => {
-    const res = await fetch(`${API}/login`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ email, password }),
-    });
-
-    const data = await res.json();
-
-    if (data.access_token) {
-      localStorage.setItem("token", data.access_token);
-      setToken(data.access_token);
-    } else {
-      alert("Erreur login");
-    }
-  };
-
-  // 📧 EMAIL
-  const analyze = async () => {
-    const res = await fetch(`${API}/email`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-      },
-      body: JSON.stringify({ content }),
-    });
-
-    const data = await res.json();
-    setResult(JSON.stringify(data, null, 2));
-  };
-
-  // 📄 FACTURE
-  const analyzeInvoice = async () => {
-    if (!file) {
-      alert("Ajoute un fichier");
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const res = await fetch(`${API}/invoice`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`,
-      },
-      body: formData,
-    });
-
-    const data = await res.json();
-    setInvoiceResult(JSON.stringify(data, null, 2));
-  };
-
-  // 💳 STRIPE (FIX FINAL)
-  const upgrade = async () => {
-    const token = localStorage.getItem("token");
-
-    console.log("TOKEN:", token);
-
-    if (!token) {
-      alert("Reconnecte-toi");
-      return;
-    }
-
-    const res = await fetch(`${API}/create-checkout-session`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    console.log("STATUS:", res.status);
-
-    const data = await res.json();
-    console.log("DATA:", data);
-
-    if (res.status === 401) {
-      alert("Session expirée → reconnecte-toi");
-      return;
-    }
-
-    if (data.url) {
-      window.location.href = data.url;
-    } else {
-      alert("Erreur Stripe");
-    }
-  };
-
-  // 🚪 LOGOUT
-  const logout = () => {
-    localStorage.removeItem("token");
-    setToken("");
-    setUser(null);
-  };
-
+export default function Landing() {
   return (
-    <div className="min-h-screen bg-gray-100 flex">
+    <div className="min-h-screen bg-white flex flex-col">
 
-      {!token ? (
-        <div className="flex items-center justify-center w-full">
-          <div className="bg-white p-8 rounded-xl shadow w-96 text-center">
+      {/* HERO */}
+      <section className="flex flex-col items-center justify-center text-center px-6 py-24">
+        <h1 className="text-5xl font-bold mb-6">
+          AdminFlow
+        </h1>
 
-            <Image src="/logo.png" alt="logo" width={80} height={80} className="mx-auto mb-4"/>
+        <p className="text-xl text-gray-600 mb-8 max-w-2xl">
+          Automatise tes emails et factures avec l’IA. Gagne des heures chaque semaine.
+        </p>
 
-            <h1 className="text-xl font-bold mb-4">AdminFlow AI</h1>
+        <a
+          href="/dashboard"
+          className="bg-indigo-600 text-white px-8 py-4 rounded-xl text-lg shadow hover:scale-105 transition"
+        >
+          Essayer gratuitement
+        </a>
+      </section>
 
-            <input
-              placeholder="Email"
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full p-2 border rounded mb-2"
-            />
-
-            <input
-              type="password"
-              placeholder="Mot de passe"
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full p-2 border rounded mb-4"
-            />
-
-            <button onClick={login} className="w-full bg-indigo-600 text-white p-2 rounded">
-              Login
-            </button>
-
-          </div>
+      {/* FEATURES */}
+      <section className="grid md:grid-cols-3 gap-8 px-10 py-20 bg-gray-50">
+        <div className="bg-white p-6 rounded-xl shadow-sm">
+          <h3 className="font-semibold mb-2">📧 Emails intelligents</h3>
+          <p className="text-gray-600">
+            Analyse automatique et réponses prêtes à envoyer.
+          </p>
         </div>
 
-      ) : (
+        <div className="bg-white p-6 rounded-xl shadow-sm">
+          <h3 className="font-semibold mb-2">📄 Factures automatiques</h3>
+          <p className="text-gray-600">
+            Extraction des données et organisation instantanée.
+          </p>
+        </div>
 
-        <>
-          <aside className="w-64 bg-white p-6 shadow flex flex-col">
-            <h2 className="font-bold mb-6">Dashboard</h2>
+        <div className="bg-white p-6 rounded-xl shadow-sm">
+          <h3 className="font-semibold mb-2">⚡ Gain de temps</h3>
+          <p className="text-gray-600">
+            Automatise tes tâches administratives en un clic.
+          </p>
+        </div>
+      </section>
 
-            <button onClick={upgrade} className="mt-auto bg-yellow-400 p-2 rounded">
-              ⭐ Premium
-            </button>
+      {/* PRICING */}
+      <section className="py-20 text-center">
+        <h2 className="text-3xl font-bold mb-10">
+          Tarification simple
+        </h2>
 
-            <button onClick={logout} className="mt-2 bg-red-500 text-white p-2 rounded">
-              Logout
-            </button>
-          </aside>
+        <div className="flex flex-col md:flex-row justify-center gap-6">
 
-          <main className="flex-1 p-10">
+          {/* FREE */}
+          <div className="border p-8 rounded-xl w-80">
+            <h3 className="text-xl font-semibold mb-4">Gratuit</h3>
+            <p className="mb-4">Essai limité</p>
+            <p className="text-3xl font-bold mb-6">0€</p>
+          </div>
 
-            <div className="grid grid-cols-3 gap-6 mb-8">
-              <div className="bg-white p-4 rounded shadow">
-                Emails: {user?.usage}
-              </div>
-              <div className="bg-white p-4 rounded shadow">
-                Statut: {user?.premium ? "Premium" : "Free"}
-              </div>
-              <div className="bg-white p-4 rounded shadow">
-                API: Active
-              </div>
-            </div>
+          {/* PREMIUM */}
+          <div className="border-2 border-indigo-600 p-8 rounded-xl w-80">
+            <h3 className="text-xl font-semibold mb-4">Premium</h3>
+            <p className="mb-4">Accès complet</p>
+            <p className="text-3xl font-bold mb-6">9€/mois</p>
 
-            <textarea
-              placeholder="Colle un email..."
-              onChange={(e) => setContent(e.target.value)}
-              className="w-full p-3 border rounded mb-3"
-            />
+            <a
+              href="/dashboard"
+              className="bg-indigo-600 text-white px-6 py-3 rounded-lg"
+            >
+              Commencer
+            </a>
+          </div>
 
-            <button onClick={analyze} className="bg-indigo-600 text-white p-2 rounded">
-              Analyser email
-            </button>
+        </div>
+      </section>
 
-            <input
-              type="file"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="mt-4"
-            />
-
-            <button onClick={analyzeInvoice} className="bg-green-600 text-white p-2 mt-2 rounded">
-              Analyser facture
-            </button>
-
-            <pre className="mt-4">{result}</pre>
-            <pre>{invoiceResult}</pre>
-
-          </main>
-        </>
-      )}
     </div>
   );
 }

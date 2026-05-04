@@ -1,17 +1,15 @@
+# main.py
+
 import os
 import stripe
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from jose import jwt, JWTError
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+from database import SessionLocal, engine
+import models
 
-from sqlalchemy import create_engine, Column, String, Boolean
-from sqlalchemy.orm import sessionmaker, declarative_base
+models.Base.metadata.create_all(bind=engine)
 
-# =========================
-# CONFIG
-# =========================
 app = FastAPI()
 
 app.add_middleware(
@@ -22,187 +20,126 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
-print("🔐 STRIPE KEY:", STRIPE_SECRET_KEY)
-print("🔐 WEBHOOK SECRET:", STRIPE_WEBHOOK_SECRET)
-
-stripe.api_key = STRIPE_SECRET_KEY
-
-SECRET_KEY = "secret"
-ALGORITHM = "HS256"
-security = HTTPBearer()
-
-# =========================
-# DATABASE
-# =========================
-DATABASE_URL = "sqlite:///./adminflow.db"
-
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine)
-Base = declarative_base()
-
-class User(Base):
-    __tablename__ = "users"
-
-    email = Column(String, primary_key=True, index=True)
-    password = Column(String)
-    premium = Column(Boolean, default=False)
-
-Base.metadata.create_all(bind=engine)
-
-# =========================
-# AUTH
-# =========================
-class AuthRequest(BaseModel):
-    email: str
-    password: str
-
-def create_token(email):
-    return jwt.encode({"sub": email}, SECRET_KEY, algorithm=ALGORITHM)
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+# DB
+def get_db():
+    db = SessionLocal()
     try:
-        token = credentials.credentials
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload.get("sub")
-    except JWTError:
-        raise HTTPException(status_code=403, detail="Invalid token")
+        yield db
+    finally:
+        db.close()
+
+# USER FAKE (simplifié pour ton setup actuel)
+def get_user(db: Session):
+    return db.query(models.User).first()
 
 # =========================
-# AUTH ROUTES
+# 📧 ANALYSE EMAIL
 # =========================
-@app.post("/login")
-def login(data: AuthRequest):
-    db = SessionLocal()
+@app.post("/email")
+def analyze_email(data: dict, db: Session = Depends(get_db)):
+    user = get_user(db)
 
-    user = db.query(User).filter(User.email == data.email).first()
+    content = data.get("content")
 
-    if not user:
-        user = User(email=data.email, password=data.password)
-        db.add(user)
-        db.commit()
+    result = f"Analyse IA simulée :\n\n{content[:200]}..."
 
-    token = create_token(data.email)
+    # 🔥 SAUVEGARDE HISTORIQUE
+    history = models.History(
+        user_id=user.id,
+        content=content,
+        result=result
+    )
+    db.add(history)
 
-    return {"access_token": token}
+    # incrément usage
+    user.usage = (user.usage or 0) + 1
 
-@app.get("/me")
-def me(user_email: str = Depends(get_current_user)):
-    db = SessionLocal()
-    user = db.query(User).filter(User.email == user_email).first()
+    db.commit()
 
-    if not user:
-        return {
-            "email": user_email,
-            "premium": False
+    return {"result": result}
+
+
+# =========================
+# 📜 HISTORIQUE
+# =========================
+@app.get("/history")
+def get_history(db: Session = Depends(get_db)):
+    user = get_user(db)
+
+    history = (
+        db.query(models.History)
+        .filter(models.History.user_id == user.id)
+        .order_by(models.History.id.desc())
+        .limit(10)
+        .all()
+    )
+
+    return [
+        {
+            "content": h.content,
+            "result": h.result
         }
+        for h in history
+    ]
+
+
+# =========================
+# 👤 USER INFO
+# =========================
+@app.get("/me")
+def me(db: Session = Depends(get_db)):
+    user = get_user(db)
 
     return {
         "email": user.email,
-        "premium": user.premium
+        "premium": user.premium,
+        "usage": user.usage,
     }
 
+
 # =========================
-# STRIPE CHECKOUT
+# 💳 STRIPE
 # =========================
 @app.post("/create-checkout-session")
-def create_checkout(user_email: str = Depends(get_current_user)):
-
-    customer = stripe.Customer.create(
-        email=user_email
-    )
-
+def create_checkout_session():
     session = stripe.checkout.Session.create(
-        customer=customer.id,
         payment_method_types=["card"],
         mode="subscription",
-        line_items=[{
-            "price_data": {
-                "currency": "eur",
-                "product_data": {"name": "AdminFlow Premium"},
-                "unit_amount": 900,
-                "recurring": {"interval": "month"},
-            },
-            "quantity": 1,
-        }],
-        success_url="http://localhost:3000",
-        cancel_url="http://localhost:3000",
+        line_items=[
+            {
+                "price_data": {
+                    "currency": "eur",
+                    "product_data": {
+                        "name": "AdminFlow Premium",
+                    },
+                    "unit_amount": 900,
+                    "recurring": {"interval": "month"},
+                },
+                "quantity": 1,
+            }
+        ],
+        success_url="http://localhost:3000/dashboard",
+        cancel_url="http://localhost:3000/dashboard",
     )
 
     return {"url": session.url}
 
-# =========================
-# WEBHOOK STRIPE FINAL
-# =========================
+
 @app.post("/webhook")
-async def webhook(request: Request):
+async def webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
 
-    try:
-        event = stripe.Webhook.construct_event(
-            payload,
-            sig_header,
-            STRIPE_WEBHOOK_SECRET
-        )
-    except Exception as e:
-        print("❌ Webhook error:", e)
-        raise HTTPException(status_code=400)
+    event = stripe.Webhook.construct_event(
+        payload, sig_header, WEBHOOK_SECRET
+    )
 
-    print("📩 EVENT:", event["type"])
-
-    # =========================
-    # CHECKOUT COMPLETED
-    # =========================
     if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-
-        customer_id = session.customer
-        print("🧾 CUSTOMER:", customer_id)
-
-        if customer_id:
-            customer = stripe.Customer.retrieve(customer_id)
-            email = customer.email
-
-            print("📧 EMAIL:", email)
-
-            db = SessionLocal()
-            user = db.query(User).filter(User.email == email).first()
-
-            # 🔥 FIX CRITIQUE
-            if not user:
-                user = User(email=email, password="stripe")
-                db.add(user)
-
-            user.premium = True
-            db.commit()
-
-            print("🔥 PREMIUM ACTIVÉ")
-
-    # =========================
-    # INVOICE PAID (backup)
-    # =========================
-    if event["type"] == "invoice.paid":
-        invoice = event["data"]["object"]
-
-        customer_id = invoice.customer
-
-        if customer_id:
-            customer = stripe.Customer.retrieve(customer_id)
-            email = customer.email
-
-            db = SessionLocal()
-            user = db.query(User).filter(User.email == email).first()
-
-            if not user:
-                user = User(email=email, password="stripe")
-                db.add(user)
-
-            user.premium = True
-            db.commit()
-
-            print("🔥 PREMIUM ACTIVÉ (invoice)")
+        user = get_user(db)
+        user.premium = True
+        db.commit()
 
     return {"status": "ok"}
