@@ -22,7 +22,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ENV
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
@@ -33,7 +32,6 @@ stripe.api_key = STRIPE_SECRET_KEY
 
 SECRET_KEY = "secret"
 ALGORITHM = "HS256"
-
 security = HTTPBearer()
 
 # =========================
@@ -95,6 +93,12 @@ def me(user_email: str = Depends(get_current_user)):
     db = SessionLocal()
     user = db.query(User).filter(User.email == user_email).first()
 
+    if not user:
+        return {
+            "email": user_email,
+            "premium": False
+        }
+
     return {
         "email": user.email,
         "premium": user.premium
@@ -130,7 +134,7 @@ def create_checkout(user_email: str = Depends(get_current_user)):
     return {"url": session.url}
 
 # =========================
-# WEBHOOK STRIPE (FIX FINAL)
+# WEBHOOK STRIPE FINAL
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -149,7 +153,9 @@ async def webhook(request: Request):
 
     print("📩 EVENT:", event["type"])
 
-    # 🔥 CHECKOUT COMPLETED
+    # =========================
+    # CHECKOUT COMPLETED
+    # =========================
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
 
@@ -165,12 +171,19 @@ async def webhook(request: Request):
             db = SessionLocal()
             user = db.query(User).filter(User.email == email).first()
 
-            if user:
-                user.premium = True
-                db.commit()
-                print("🔥 PREMIUM ACTIVÉ")
+            # 🔥 FIX CRITIQUE
+            if not user:
+                user = User(email=email, password="stripe")
+                db.add(user)
 
-    # 🔥 BONUS sécurité : abonnement confirmé
+            user.premium = True
+            db.commit()
+
+            print("🔥 PREMIUM ACTIVÉ")
+
+    # =========================
+    # INVOICE PAID (backup)
+    # =========================
     if event["type"] == "invoice.paid":
         invoice = event["data"]["object"]
 
@@ -183,9 +196,13 @@ async def webhook(request: Request):
             db = SessionLocal()
             user = db.query(User).filter(User.email == email).first()
 
-            if user:
-                user.premium = True
-                db.commit()
-                print("🔥 PREMIUM ACTIVÉ (invoice)")
+            if not user:
+                user = User(email=email, password="stripe")
+                db.add(user)
+
+            user.premium = True
+            db.commit()
+
+            print("🔥 PREMIUM ACTIVÉ (invoice)")
 
     return {"status": "ok"}
