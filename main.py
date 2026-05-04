@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -6,31 +6,42 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import stripe
-import base64
 
-from jose import jwt, JWTError
+# =========================
+# AUTH
+# =========================
+from jose import jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
-from sqlalchemy import create_engine, Column, String, Boolean, Integer
-from sqlalchemy.orm import sessionmaker, declarative_base, Session
-
-# =========================
-# CONFIG
-# =========================
-load_dotenv()
-
 SECRET_KEY = "supersecretkey"
 ALGORITHM = "HS256"
-FREE_LIMIT = 5
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+security = HTTPBearer()
+
+def hash_password(password: str):
+    return pwd_context.hash(password)
+
+def verify_password(plain, hashed):
+    return pwd_context.verify(plain, hashed)
+
+def create_access_token(data: dict):
+    expire = datetime.utcnow() + timedelta(hours=12)
+    data.update({"exp": expire})
+    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    return payload.get("sub")
 
 # =========================
-# DB
+# DATABASE
 # =========================
+from sqlalchemy import create_engine, Column, String, Boolean, Integer
+from sqlalchemy.orm import sessionmaker, declarative_base
+
 DATABASE_URL = "sqlite:///./adminflow.db"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -47,37 +58,17 @@ class User(Base):
 
 Base.metadata.create_all(bind=engine)
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 # =========================
-# AUTH
+# ENV
 # =========================
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-security = HTTPBearer()
+load_dotenv()
 
-def hash_password(password: str):
-    return pwd_context.hash(password)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def verify_password(plain, hashed):
-    return pwd_context.verify(plain, hashed)
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
-def create_access_token(data: dict):
-    expire = datetime.utcnow() + timedelta(hours=24)
-    data.update({"exp": expire})
-    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload.get("sub")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Token invalide")
+FREE_LIMIT = 5
 
 # =========================
 # APP
@@ -86,7 +77,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ⚠️ en prod limiter
+    allow_origins=["*"],  # production => mettre ton domaine
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -106,9 +97,11 @@ class AuthRequest(BaseModel):
 # AUTH ROUTES
 # =========================
 @app.post("/signup")
-def signup(data: AuthRequest, db: Session = Depends(get_db)):
+def signup(data: AuthRequest):
+    db = SessionLocal()
+
     if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(400, "User exists")
+        return {"error": "User exists"}
 
     user = User(
         email=data.email,
@@ -121,20 +114,24 @@ def signup(data: AuthRequest, db: Session = Depends(get_db)):
     return {"message": "Account created"}
 
 @app.post("/login")
-def login(data: AuthRequest, db: Session = Depends(get_db)):
+def login(data: AuthRequest):
+    db = SessionLocal()
+
     user = db.query(User).filter(User.email == data.email).first()
 
-    if not user or not verify_password(data.password, user.password):
-        raise HTTPException(401, "Invalid credentials")
+    if not user:
+        return {"error": "User not found"}
+
+    if not verify_password(data.password, user.password):
+        return {"error": "Wrong password"}
 
     token = create_access_token({"sub": user.email})
+
     return {"access_token": token}
 
-# =========================
-# USER
-# =========================
 @app.get("/me")
-def get_me(user_email: str = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_me(user_email: str = Depends(get_current_user)):
+    db = SessionLocal()
     user = db.query(User).filter(User.email == user_email).first()
 
     return {
@@ -144,32 +141,19 @@ def get_me(user_email: str = Depends(get_current_user), db: Session = Depends(ge
     }
 
 # =========================
-# DEBUG PREMIUM
-# =========================
-@app.get("/force-premium")
-def force_premium(email: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
-
-    if not user:
-        return {"error": "user not found"}
-
-    user.premium = True
-    db.commit()
-
-    return {"status": "premium activé"}
-
-# =========================
-# EMAIL IA
+# EMAIL AI
 # =========================
 @app.post("/email")
-def analyze_email(request: EmailRequest, user_email: str = Depends(get_current_user), db: Session = Depends(get_db)):
+def analyze_email(request: EmailRequest, user_email: str = Depends(get_current_user)):
+    db = SessionLocal()
+
     user = db.query(User).filter(User.email == user_email).first()
 
     if not user:
         raise HTTPException(404)
 
     if not user.premium and user.usage >= FREE_LIMIT:
-        raise HTTPException(403, "Limit reached")
+        return {"error": "Limit reached"}
 
     user.usage += 1
     db.commit()
@@ -177,11 +161,10 @@ def analyze_email(request: EmailRequest, user_email: str = Depends(get_current_u
     response = client.responses.create(
         model="gpt-4.1-mini",
         input=f"""
-Analyse cet email :
-
-- Catégorie
-- Résumé
-- Réponse professionnelle
+Analyse cet email et réponds avec :
+- résumé
+- action à faire
+- réponse prête
 
 Email :
 {request.content}
@@ -195,53 +178,21 @@ Email :
     }
 
 # =========================
-# FACTURE IA
+# INVOICE (simple)
 # =========================
 @app.post("/invoice")
-async def analyze_invoice(
-    file: UploadFile = File(...),
-    user_email: str = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    user = db.query(User).filter(User.email == user_email).first()
-
-    if not user:
-        raise HTTPException(404)
-
-    if not user.premium:
-        raise HTTPException(403, "Premium required")
-
-    content = await file.read()
-    base64_file = base64.b64encode(content).decode("utf-8")
-
-    response = client.responses.create(
-        model="gpt-4.1",
-        input=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": "Analyse cette facture et donne montant, TVA, date, fournisseur"
-                },
-                {
-                    "type": "input_image",
-                    "image_base64": base64_file
-                }
-            ]
-        }]
-    )
-
-    user.usage += 1
-    db.commit()
-
-    return {"result": response.output_text}
+async def invoice(file: UploadFile = File(...), user_email: str = Depends(get_current_user)):
+    return {"message": "Facture reçue (à améliorer ensuite)"}
 
 # =========================
 # STRIPE CHECKOUT
 # =========================
 @app.post("/create-checkout-session")
-def create_checkout(user_email: str = Depends(get_current_user)):
-    customer = stripe.Customer.create(email=user_email)
+def create_checkout_session(user_email: str = Depends(get_current_user)):
+
+    customer = stripe.Customer.create(
+        email=user_email
+    )
 
     session = stripe.checkout.Session.create(
         customer=customer.id,
@@ -263,7 +214,7 @@ def create_checkout(user_email: str = Depends(get_current_user)):
     return {"url": session.url}
 
 # =========================
-# STRIPE WEBHOOK
+# WEBHOOK (FIX FINAL)
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -276,20 +227,29 @@ async def webhook(request: Request):
             sig_header,
             STRIPE_WEBHOOK_SECRET
         )
-    except Exception:
-        raise HTTPException(400, "Webhook error")
+    except Exception as e:
+        print("❌ Webhook error:", e)
+        raise HTTPException(status_code=400)
 
-    if event["type"] == "invoice.paid":
-        customer_id = event["data"]["object"]["customer"]
+    print("✅ EVENT:", event["type"])
 
-        customer = stripe.Customer.retrieve(customer_id)
-        email = customer.get("email")
+    if event["type"] in ["invoice.paid", "checkout.session.completed"]:
+        data = event["data"]["object"]
 
-        db = SessionLocal()
-        user = db.query(User).filter(User.email == email).first()
+        customer_id = data.get("customer")
 
-        if user:
-            user.premium = True
-            db.commit()
+        if customer_id:
+            customer = stripe.Customer.retrieve(customer_id)
+            email = customer.get("email")
+
+            print("📧 EMAIL:", email)
+
+            db = SessionLocal()
+            user = db.query(User).filter(User.email == email).first()
+
+            if user:
+                user.premium = True
+                db.commit()
+                print("🔥 PREMIUM ACTIVÉ")
 
     return {"status": "ok"}
