@@ -14,7 +14,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # en prod: mets ton domaine
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,9 +40,6 @@ PRICE_ID = "price_1TTM341e5DKL1tszQvMtQJ7C"
 print("🔐 STRIPE KEY:", stripe.api_key)
 print("🔐 WEBHOOK SECRET:", WEBHOOK_SECRET)
 
-# -------------------------
-# USER TEMP
-# -------------------------
 CURRENT_USER_EMAIL = "chanadet30@gmail.com"
 
 # -------------------------
@@ -70,9 +67,6 @@ def get_history(db: Session = Depends(get_db)):
     return [{"content": e.content, "result": e.result} for e in emails]
 
 
-# -------------------------
-# ANALYSE + LIMIT FREE
-# -------------------------
 @app.post("/email")
 async def analyze_email(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
@@ -90,7 +84,6 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
 
-    # LIMIT FREE = 3
     if not user.premium:
         count = db.query(models.Email).filter(
             models.Email.user_email == CURRENT_USER_EMAIL
@@ -113,9 +106,6 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
     return {"result": result}
 
 
-# -------------------------
-# CHECKOUT
-# -------------------------
 @app.post("/create-checkout-session")
 def create_checkout():
     session = stripe.checkout.Session.create(
@@ -134,7 +124,7 @@ def create_checkout():
 
 
 # -------------------------
-# WEBHOOK (FIX FINAL)
+# WEBHOOK FIX FINAL
 # -------------------------
 @app.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
@@ -146,41 +136,48 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             payload, sig_header, WEBHOOK_SECRET
         )
     except Exception as e:
-        print("❌ Webhook error:", e)
+        print("❌ Webhook signature error:", e)
         return {"status": "error"}
 
     print("📩 EVENT:", event["type"])
 
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
+    try:
+        if event["type"] == "checkout.session.completed":
+            session = event["data"]["object"]
 
-        email = session.get("customer_email")
+            email = None
 
-        # 🔥 fallback (IMPORTANT)
-        if not email:
-            customer_id = session.get("customer")
-            if customer_id:
-                customer = stripe.Customer.retrieve(customer_id)
+            # 🔥 FIX principal
+            if hasattr(session, "customer_details") and session.customer_details:
+                email = session.customer_details.email
+
+            # 🔥 fallback
+            if not email and hasattr(session, "customer") and session.customer:
+                customer = stripe.Customer.retrieve(session.customer)
                 email = customer.email
 
-        print("📧 EMAIL:", email)
+            print("📧 EMAIL:", email)
 
-        if not email:
-            print("❌ Aucun email trouvé")
-            return {"status": "error"}
+            if not email:
+                print("❌ Aucun email trouvé")
+                return {"status": "error"}
 
-        user = db.query(models.User).filter(
-            models.User.email == email
-        ).first()
+            user = db.query(models.User).filter(
+                models.User.email == email
+            ).first()
 
-        if not user:
-            user = models.User(email=email, premium=True)
-            db.add(user)
-        else:
-            user.premium = True
+            if not user:
+                user = models.User(email=email, premium=True)
+                db.add(user)
+            else:
+                user.premium = True
 
-        db.commit()
+            db.commit()
 
-        print("🔥 PREMIUM ACTIVÉ")
+            print("🔥 PREMIUM ACTIVÉ")
+
+    except Exception as e:
+        print("❌ WEBHOOK PROCESS ERROR:", e)
+        return {"status": "error"}
 
     return {"status": "success"}
