@@ -42,7 +42,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 PRICE_ID = "price_1TTM341e5DKL1tszQvMtQJ7C"
 CURRENT_USER_EMAIL = "chanadet30@gmail.com"
 
-print("🔥 BACKEND V3 (EMAIL + FACTURE)")
+print("🔥 BACKEND VERSION V2 ACTIVE")
 
 # -------------------------
 # ROUTES
@@ -70,14 +70,14 @@ def get_history(db: Session = Depends(get_db)):
 
 
 # -------------------------
-# ANALYSE IA + FACTURE
+# ANALYSE IA
 # -------------------------
 @app.post("/email")
 async def analyze_email(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
     content = body.get("content")
 
-    print("📨 EMAIL:", content)
+    print("📨 EMAIL REÇU:", content)
 
     if not content:
         return {"result": "Aucun contenu"}
@@ -101,65 +101,48 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
             return {"error": "LIMIT_REACHED"}
 
     # -------------------------
-    # 🧠 IA PROMPT
+    # TEST OPENAI
     # -------------------------
-    prompt = f"""
-Tu es un assistant administratif intelligent.
-
-Analyse cet email et fais EXACTEMENT ceci :
-
-1. Détecte le type :
-- EMAIL
-- FACTURE
-
-2. Si FACTURE, extrait :
-CLIENT:
-MONTANT:
-DATE:
-DESCRIPTION:
-
-3. Génère ensuite :
-
-📌 Résumé :
-🎯 Intention :
-✉️ Réponse suggérée :
-
-IMPORTANT :
-- Sois clair
-- Sois professionnel
-- Réponse directement utilisable
-
-EMAIL :
-{content}
-"""
-
     try:
-        print("🚀 OPENAI CALL")
+        print("🚀 OPENAI CALL START")
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Assistant administratif pro"},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "Assistant professionnel qui analyse les emails."
+                },
+                {
+                    "role": "user",
+                    "content": f"""
+Analyse cet email et réponds EXACTEMENT avec :
+
+📌 Résumé :
+(1 phrase)
+
+🎯 Intention :
+(type)
+
+✉️ Réponse suggérée :
+(réponse pro)
+
+EMAIL :
+{content}
+"""
+                }
             ]
         )
 
         result = response.choices[0].message.content
 
-        print("✅ IA OK")
+        print("✅ OPENAI OK")
 
     except Exception as e:
-        print("❌ ERREUR IA:", e)
+        print("❌ ERREUR OPENAI:", e)
         result = "Erreur IA"
 
-    # -------------------------
-    # DETECTION FACTURE
-    # -------------------------
-    is_invoice = "CLIENT:" in result and "MONTANT:" in result
-
-    # -------------------------
-    # SAVE DB
-    # -------------------------
+    # SAVE
     new_email = models.Email(
         user_email=CURRENT_USER_EMAIL,
         content=content,
@@ -169,10 +152,7 @@ EMAIL :
     db.add(new_email)
     db.commit()
 
-    return {
-        "result": result,
-        "is_invoice": is_invoice
-    }
+    return {"result": result}
 
 
 # -------------------------
