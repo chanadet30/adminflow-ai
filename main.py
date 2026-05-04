@@ -8,23 +8,17 @@ from database import SessionLocal, engine, Base
 import models
 
 # -------------------------
-# INIT APP
+# INIT
 # -------------------------
-
 app = FastAPI()
 
-# 🔥 CORS (corrige ton erreur précédente)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # en prod tu peux restreindre
+    allow_origins=["*"],  # en prod: mets ton domaine
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# -------------------------
-# DATABASE
-# -------------------------
 
 Base.metadata.create_all(bind=engine)
 
@@ -36,9 +30,8 @@ def get_db():
         db.close()
 
 # -------------------------
-# STRIPE CONFIG
+# STRIPE
 # -------------------------
-
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
@@ -48,9 +41,8 @@ print("🔐 STRIPE KEY:", stripe.api_key)
 print("🔐 WEBHOOK SECRET:", WEBHOOK_SECRET)
 
 # -------------------------
-# USER TEMP (remplacera auth plus tard)
+# USER TEMP
 # -------------------------
-
 CURRENT_USER_EMAIL = "chanadet30@gmail.com"
 
 # -------------------------
@@ -66,10 +58,7 @@ def get_me(db: Session = Depends(get_db)):
     if not user:
         return {"email": CURRENT_USER_EMAIL, "premium": False}
 
-    return {
-        "email": user.email,
-        "premium": user.premium
-    }
+    return {"email": user.email, "premium": user.premium}
 
 
 @app.get("/history")
@@ -78,19 +67,12 @@ def get_history(db: Session = Depends(get_db)):
         models.Email.user_email == CURRENT_USER_EMAIL
     ).order_by(models.Email.id.desc()).all()
 
-    return [
-        {
-            "content": e.content,
-            "result": e.result
-        }
-        for e in emails
-    ]
+    return [{"content": e.content, "result": e.result} for e in emails]
 
 
 # -------------------------
-# ANALYSE EMAIL + LIMIT FREE
+# ANALYSE + LIMIT FREE
 # -------------------------
-
 @app.post("/email")
 async def analyze_email(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
@@ -99,7 +81,6 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
     if not content:
         return {"result": "Aucun contenu"}
 
-    # 👤 récupérer user
     user = db.query(models.User).filter(
         models.User.email == CURRENT_USER_EMAIL
     ).first()
@@ -109,7 +90,7 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
 
-    # 🔒 LIMIT FREE (3 analyses)
+    # LIMIT FREE = 3
     if not user.premium:
         count = db.query(models.Email).filter(
             models.Email.user_email == CURRENT_USER_EMAIL
@@ -118,7 +99,6 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
         if count >= 3:
             return {"error": "LIMIT_REACHED"}
 
-    # 🤖 SIMULATION IA
     result = f"Analyse IA:\n{content[:300]}..."
 
     new_email = models.Email(
@@ -134,9 +114,8 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
 
 
 # -------------------------
-# STRIPE CHECKOUT
+# CHECKOUT
 # -------------------------
-
 @app.post("/create-checkout-session")
 def create_checkout():
     session = stripe.checkout.Session.create(
@@ -155,9 +134,8 @@ def create_checkout():
 
 
 # -------------------------
-# STRIPE WEBHOOK
+# WEBHOOK (FIX FINAL)
 # -------------------------
-
 @app.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
@@ -178,7 +156,18 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
         email = session.get("customer_email")
 
+        # 🔥 fallback (IMPORTANT)
+        if not email:
+            customer_id = session.get("customer")
+            if customer_id:
+                customer = stripe.Customer.retrieve(customer_id)
+                email = customer.email
+
         print("📧 EMAIL:", email)
+
+        if not email:
+            print("❌ Aucun email trouvé")
+            return {"status": "error"}
 
         user = db.query(models.User).filter(
             models.User.email == email
