@@ -42,6 +42,8 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 PRICE_ID = "price_1TTM341e5DKL1tszQvMtQJ7C"
 CURRENT_USER_EMAIL = "chanadet30@gmail.com"
 
+print("🔥 BACKEND VERSION V2 ACTIVE")
+
 # -------------------------
 # ROUTES
 # -------------------------
@@ -68,16 +70,19 @@ def get_history(db: Session = Depends(get_db)):
 
 
 # -------------------------
-# IA ANALYSE EMAIL
+# ANALYSE IA
 # -------------------------
 @app.post("/email")
 async def analyze_email(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
     content = body.get("content")
 
+    print("📨 EMAIL REÇU:", content)
+
     if not content:
         return {"result": "Aucun contenu"}
 
+    # 🔒 LIMIT FREE
     user = db.query(models.User).filter(
         models.User.email == CURRENT_USER_EMAIL
     ).first()
@@ -87,7 +92,6 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
 
-    # 🔒 LIMIT FREE
     if not user.premium:
         count = db.query(models.Email).filter(
             models.Email.user_email == CURRENT_USER_EMAIL
@@ -97,39 +101,48 @@ async def analyze_email(request: Request, db: Session = Depends(get_db)):
             return {"error": "LIMIT_REACHED"}
 
     # -------------------------
-    # 🧠 OPENAI ANALYSE
+    # TEST OPENAI
     # -------------------------
-    prompt = f"""
-Tu es un assistant professionnel spécialisé dans l’analyse d’emails.
+    try:
+        print("🚀 OPENAI CALL START")
 
-Analyse cet email et réponds avec ce format EXACT :
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Assistant professionnel qui analyse les emails."
+                },
+                {
+                    "role": "user",
+                    "content": f"""
+Analyse cet email et réponds EXACTEMENT avec :
 
 📌 Résumé :
-(1 phrase claire)
+(1 phrase)
 
 🎯 Intention :
-(type : demande / plainte / info / urgence)
+(type)
 
 ✉️ Réponse suggérée :
-(rédige une réponse professionnelle prête à envoyer)
+(réponse pro)
 
 EMAIL :
 {content}
 """
+                }
+            ]
+        )
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Assistant email professionnel"},
-            {"role": "user", "content": prompt}
-        ]
-    )
+        result = response.choices[0].message.content
 
-    result = response.choices[0].message.content
+        print("✅ OPENAI OK")
 
-    # -------------------------
-    # SAVE DB
-    # -------------------------
+    except Exception as e:
+        print("❌ ERREUR OPENAI:", e)
+        result = "Erreur IA"
+
+    # SAVE
     new_email = models.Email(
         user_email=CURRENT_USER_EMAIL,
         content=content,
@@ -143,7 +156,7 @@ EMAIL :
 
 
 # -------------------------
-# STRIPE CHECKOUT
+# STRIPE
 # -------------------------
 @app.post("/create-checkout-session")
 def create_checkout():
